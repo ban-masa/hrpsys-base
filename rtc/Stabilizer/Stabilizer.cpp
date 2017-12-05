@@ -1961,6 +1961,14 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
       }
   }
 
+  std::vector<Eigen::Vector2d> static_friction_coefficient_vec;
+  szd->get_static_friction_coefficients(static_friction_coefficient_vec);
+  i_stp.ee_static_friction_coefficient_sequence.length(static_friction_coefficient_vec.size());
+  for (size_t ee_idx = 0; ee_idx < static_friction_coefficient_vec.size(); ee_idx++) {
+    i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[0] = static_friction_coefficient_vec[ee_idx](0);
+    i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[1] = static_friction_coefficient_vec[ee_idx](1);
+  }
+
   i_stp.eefm_cogvel_cutoff_freq = act_cogvel_filter->getCutOffFreq();
   i_stp.eefm_wrench_alpha_blending = szd->get_wrench_alpha_blending();
   i_stp.eefm_alpha_cutoff_freq = szd->get_alpha_cutoff_freq();
@@ -2161,6 +2169,19 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
       szd->set_vertices(support_polygon_vec);
       szd->print_vertices(std::string(m_profile.instance_name));
   }
+
+  if (i_stp.ee_static_friction_coefficient_sequence.length() != stikp.size()) {
+      std::cerr << "[" << m_profile.instance_name << "]   ee_static_friction_coefficient_sequence cannot be set. Length " << i_stp.ee_static_friction_coefficient_sequence.length() << " != " << stikp.size() << std::endl;
+  } else {
+      std::cerr << "[" << m_profile.instance_name << "]   ee_static_friction_coefficient_sequence set" << std::endl;
+      std::vector<Eigen::Vector2d> static_friction_coefficient_vec;
+      for (size_t ee_idx = 0; ee_idx < i_stp.ee_static_friction_coefficient_sequence.length(); ee_idx++) {
+          static_friction_coefficient_vec.push_back(Eigen::Vector2d(i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[0], i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[1]));
+      }
+      szd->set_static_friction_coefficients(static_friction_coefficient_vec);
+      szd->print_static_friction_coefficients(std::string(m_profile.instance_name));
+  }
+
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
   eefm_use_swing_damping = i_stp.eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {

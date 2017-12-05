@@ -56,13 +56,14 @@ public:
 class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
+    std::vector<Eigen::Vector2d> foot_static_friction_coefficients; // RLEG, LLEG
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
     std::vector<Eigen::Vector2d> convex_hull;
     enum projected_point_region {LEFT, MIDDLE, RIGHT};
 public:
     enum leg_type {RLEG, LLEG, RARM, LARM, BOTH, ALL};
-    SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5)
+    SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5), foot_static_friction_coefficients(4, Eigen::Vector2d(1.0, 1.0))
     {
         alpha_filter = boost::shared_ptr<FirstOrderLowPassFilter<double> >(new FirstOrderLowPassFilter<double>(1e7, _dt, 0.5)); // [Hz], Almost no filter by default
     };
@@ -118,6 +119,16 @@ public:
     {
         fs.print_vertices(str);
     };
+    void print_static_friction_coefficients (const std::string& str)
+    {
+        std::cerr << "[" << str << "]      ";
+        std::cerr << "sfcs = ";
+        for (size_t i = 0; i < foot_static_friction_coefficients.size(); i++) {
+            std::cerr << "[" << foot_static_friction_coefficients[i](0) << " " << foot_static_friction_coefficients[i](1) << "] ";
+            std::cerr << ((i==foot_static_friction_coefficients.size()-1)?"":", ");
+        }
+        std::cerr << std::endl;
+    }
     // Compare Vector2d for sorting lexicographically
     static bool compare_eigen2d(const Eigen::Vector2d& lv, const Eigen::Vector2d& rv)
     {
@@ -253,6 +264,7 @@ public:
       }
       fs_mgn.set_vertices(vec);
     };
+    void set_static_friction_coefficients(const std::vector<Eigen::Vector2d>& sfcs) { foot_static_friction_coefficients = sfcs; };
     // getter
     double get_wrench_alpha_blending () { return wrench_alpha_blending; };
     double get_leg_front_margin () { return leg_front_margin; };
@@ -261,6 +273,7 @@ public:
     double get_leg_outside_margin () { return leg_outside_margin; };
     double get_alpha_cutoff_freq () { return alpha_filter->getCutOffFreq(); };
     void get_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs.get_vertices(vs); };
+    void get_static_friction_coefficients(std::vector<Eigen::Vector2d>& sfcs) { sfcs = foot_static_friction_coefficients; };
     void get_margined_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs_mgn.get_vertices(vs); };
     //
     double calcAlpha (const hrp::Vector3& tmprefzmp,
@@ -405,7 +418,6 @@ public:
             fz_alpha_vector[i] = wrench_alpha_blending * fz_alpha_vector[i] + (1-wrench_alpha_blending) * alpha_vector[i];
         }
     };
-
     void distributeZMPToForceMoments (std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
                                       const std::vector<hrp::Vector3>& ee_pos,
                                       const std::vector<hrp::Vector3>& cop_pos,
