@@ -37,6 +37,7 @@ public:
     };
     void set_vertices (const std::vector<std::vector<Eigen::Vector2d> >& vs) { foot_vertices = vs; };
     void get_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { vs = foot_vertices; };
+    size_t get_vertices_num (size_t idx) { return foot_vertices[idx].size(); }
     void print_vertices (const std::string& str)
     {
         std::cerr << "[" << str << "]     ";
@@ -57,13 +58,14 @@ class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
     std::vector<Eigen::Vector2d> foot_static_friction_coefficients; // RLEG, LLEG
+    std::vector<hrp::dmatrix> ee_matrix_list;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
     std::vector<Eigen::Vector2d> convex_hull;
     enum projected_point_region {LEFT, MIDDLE, RIGHT};
 public:
     enum leg_type {RLEG, LLEG, RARM, LARM, BOTH, ALL};
-    SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5), foot_static_friction_coefficients(4, Eigen::Vector2d(1.0, 1.0))
+    SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5), foot_static_friction_coefficients(4, Eigen::Vector2d(1.0, 1.0)), ee_matrix_list(4, hrp::dmatrix(6, 16))
     {
         alpha_filter = boost::shared_ptr<FirstOrderLowPassFilter<double> >(new FirstOrderLowPassFilter<double>(1e7, _dt, 0.5)); // [Hz], Almost no filter by default
     };
@@ -418,6 +420,89 @@ public:
             fz_alpha_vector[i] = wrench_alpha_blending * fz_alpha_vector[i] + (1-wrench_alpha_blending) * alpha_vector[i];
         }
     };
+
+    hrp::dmatrix calcFrictionConeMatrix (const Eigen::Vector2d& mu, const int dim)
+    {
+        hrp::dmatrix cone_matrix = hrp::dmatrix::Zero(3, dim);
+        for (size_t i = 0; i < dim; i++) {
+            double theta = i * 2.0 * M_PI / dim;
+            cone_matrix(0, i) = mu[0] * std::cos(theta);
+            cone_matrix(1, i) = mu[1] * std::sin(theta);
+            cone_matrix(2, i) = 1.0;
+        }
+        return cone_matrix;
+    }
+
+    hrp::Vector3 calcSupportEdge (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const Eigen::Vector2d& local_vertex)
+    {
+        return ee_pos + ee_rot * hrp::Vector3(local_vertex(0), local_vertex(1), 0.0);
+    }
+
+    hrp::dmatrix calcWorldFrictionConeMatrix (const hrp::dmatrix& cone_matrix, const hrp::Vector3& world_vertex, const hrp::Matrix33& ee_rot)
+    {
+        int dim = cone_matrix.cols();
+        hrp::dmatrix contact_mat(6, dim);
+        hrp::dmatrix world_cone_matrix = ee_rot * cone_matrix;
+        contact_mat.block(0, 0, 3, dim) = world_cone_matrix;
+        Eigen::Matrix3d vertex_cross_product;
+        vertex_cross_product << 0, -world_vertex(2), world_vertex(1),
+                                world_vertex(2), 0, -world_vertex(0),
+                                -world_vertex(1), world_vertex(0), 0;
+        contact_mat.block(3, 0, 3, dim) = vertex_cross_product * world_cone_matrix;
+        return contact_mat;
+    }
+
+    void calcEachContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const size_t ee_idx, const std::string& ee_name, const size_t cone_dim)
+    {
+        size_t vs_num = fs.get_vertices_num(ee_idx);
+        hrp::dmatrix ee_contact_mat(6, vs_num * cone_dim);
+        hrp::dmatrix friction_cone_matrix(3, cone_dim);
+        friction_cone_matrix = calcFrictionConeMatrix(foot_static_friction_coefficients[ee_idx], cone_dim);
+        for (size_t i = 0; i < vs_num; i++) {
+            hrp::dmatrix contact_mat(6, cone_dim);
+            contact_mat = calcWorldFrictionConeMatrix(friction_cone_matrix,
+                                                      calcSupportEdge(ee_pos, ee_rot, fs.get_foot_vertex(ee_idx, i)),
+                                                      ee_rot);
+            ee_contact_mat.block(0, i * cone_dim, 6, cone_dim) = contact_mat;
+        }
+        if (ee_matrix_list.size() < ee_idx + 1) {
+            std::cerr << "[" << ee_name << "] Failed to set contact matrix. " << std::endl;
+        }
+        ee_matrix_list[ee_idx] = ee_contact_mat;
+    }
+
+    void calcAllContactMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const std::vector<std::string>& ee_name, const size_t cone_dim)
+    {
+        if (ee_pos.size() != ee_matrix_list.size()) {
+            ee_matrix_list.clear();
+            for (size_t i = 0; i < ee_pos.size(); i++) {
+                ee_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * cone_dim));
+            }
+        }
+        for (size_t i = 0; i < ee_pos.size(); i++) {
+            calcEachContactMatrix(ee_pos[i], ee_rot[i], i, ee_name[i], cone_dim);
+        }
+    }
+
+    void set_matrix (hrp::dmatrix& Phimat, const std::vector<bool>& is_contact_list)
+    {
+        size_t state_dim = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+            if (is_contact_list[i]) {
+                state_dim += ee_matrix_list[i].cols();
+            }
+        }
+        Phimat = hrp::dmatrix::Zero(state_dim + 6, state_dim);
+        size_t col_idx = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+            if (is_contact_list[i]) {
+                Phimat.block(0, col_idx, 6, ee_matrix_list[i].cols()) = ee_matrix_list[i];
+                col_idx += ee_matrix_list[i].cols();
+            }
+        }
+        Phimat.block(6, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
+    }
+
     void distributeZMPToForceMoments (std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
                                       const std::vector<hrp::Vector3>& ee_pos,
                                       const std::vector<hrp::Vector3>& cop_pos,
@@ -748,6 +833,120 @@ public:
                 std::cerr << "[" << print_str << "]   "
                           << "ref_moment [" << ee_name[i] << "] " << hrp::Vector3(ref_foot_moment[i]).format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
             }
+        }
+    };
+    void distributeZMPToForceMomentsQPwithContactMatrix (std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
+                                                         const std::vector<hrp::Vector3>& ee_pos,
+                                                         const std::vector<hrp::Matrix33>& ee_rot,
+                                                         const std::vector<std::string>& ee_name,
+                                                         const hrp::Vector3& ref_zmp, const hrp::Vector3& ref_cog, const double total_mass, const double gravity,
+                                                         const double total_fz, const std::vector<bool>& is_contact_list,
+                                                         const bool printp = true, const std::string& print_str = "")
+    {
+        size_t ee_num = ee_name.size();
+        size_t contact_ee_num = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+            if (is_contact_list[i]) contact_ee_num++;
+        }
+        if (printp) {
+            for (size_t i = 0; i < is_contact_list.size(); i++) {
+              if (is_contact_list[i]) std::cerr << "1 ";
+              else std::cerr << "0 ";
+            }
+            std::cerr << std::endl;
+        }
+        if (contact_ee_num == 0) {
+            for (size_t i = 0; i < ee_num; i++) {
+              ref_foot_force[i] = hrp::Vector3(0, 0, total_fz);
+              ref_foot_moment[i] = hrp::Vector3::Zero();
+            }
+            return;
+        }
+    
+        hrp::dvector total_wrench(6);
+        double omega2 = total_fz / (ref_cog(2) - ref_zmp(2));
+        total_wrench.head(3) = hrp::Vector3(omega2 * (ref_cog(0) - ref_zmp(0)), omega2 * (ref_cog(1) - ref_zmp(1)), total_fz);
+        total_wrench.tail(3) = ref_cog.cross(hrp::Vector3(0, 0, total_mass * gravity));
+
+        if (printp) {
+            std::cerr << "fm: ";
+            for (size_t i = 0; i < 6; i++) {
+                std::cerr << total_wrench(i) << " ";
+            }
+            std::cerr << std::endl;
+        }
+
+        size_t cone_dim = 4;
+        size_t state_dim = 0;
+        for (size_t i = 0; i < ee_num; i++) {
+            if (is_contact_list[i]) {
+                state_dim += cone_dim * fs.get_vertices_num(i);
+            }
+        }
+        hrp::dmatrix Phimat = hrp::dmatrix::Zero(state_dim + 6, state_dim);
+        hrp::dvector xivec = hrp::dvector::Zero(state_dim + 6);
+        hrp::dmatrix Wmat = hrp::dmatrix::Zero(state_dim + 6, state_dim + 6);
+        hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
+        hrp::dvector gvec = hrp::dvector::Zero(state_dim);
+        
+        calcAllContactMatrix(ee_pos, ee_rot, ee_name, cone_dim);
+        set_matrix(Phimat, is_contact_list);
+        //TODO: make mode to adapt to force, moment weight vector
+    
+        for (size_t i = 0; i < 6; i++) {
+            xivec(i) = total_wrench(i);
+        }
+        //TODO: set correct param to Wmat
+        for (size_t i = 0; i < state_dim + 6; i++) {
+            if (i < 6) Wmat(i, i) = 1e4;
+            else Wmat(i, i) = 0.1;
+        }
+        Hmat = Phimat.transpose() * Wmat * Phimat;
+        gvec = -xivec.transpose() * Wmat * Phimat;
+    
+        std::vector<hrp::dvector> rho_vec;
+        for (size_t i = 0; i < ee_num; i++) {
+            if (is_contact_list[i]) {
+                rho_vec.push_back(hrp::dvector(cone_dim * fs.get_vertices_num(i)));
+            }
+        }
+
+        solveForceMomentQPOASES(rho_vec, state_dim, contact_ee_num, Hmat, gvec);
+        hrp::dvector tmpv(6);
+        size_t tmp_idx = 0;
+        for (size_t i = 0; i < ee_num; i++) {
+            if (is_contact_list[i]) {
+                tmpv = ee_matrix_list[i] * rho_vec[tmp_idx];
+                tmp_idx++;
+                ref_foot_force[i] = hrp::Vector3(tmpv(0), tmpv(1), tmpv(2));
+                ref_foot_moment[i] = hrp::Vector3(tmpv(3), tmpv(4), tmpv(5)) - ee_pos[i].cross(ref_foot_force[i]);
+            } else {
+                ref_foot_force[i] = hrp::Vector3::Zero();
+                ref_foot_moment[i] = hrp::Vector3::Zero();
+            }
+        }
+
+        if (printp) {
+            hrp::Vector3 res_force = hrp::Vector3::Zero();
+            hrp::Vector3 res_moment = hrp::Vector3::Zero();
+
+            for (size_t i = 0; i < ee_num; i++) {
+                res_force = res_force + ref_foot_force[i];
+                res_moment = res_moment + ee_pos[i].cross(ref_foot_force[i]) + ref_foot_moment[i];
+                if (i == 0) std::cerr << "rleg: " << std::endl;
+                else std::cerr << "lleg: " << std::endl;
+                std::cerr << "pos: " << ee_pos[i](0) << ", " << ee_pos[i](1) << ", " << ee_pos[i](2) << std::endl;
+                std::cerr << "wrench: " << ref_foot_force[i](0) << " " << ref_foot_force[i](1) << " " << ref_foot_force[i](2) << " " << ref_foot_moment[i](0) << " " << ref_foot_moment[i](1) << " " << ref_foot_moment[i](2) << std::endl;
+            }
+            std::cerr << "Total wrench: " << std::endl;
+            std::cerr << res_force(0) << ", " << res_force(1) << ", " << res_force(2) << ", " << res_moment(0) << ", " << res_moment(1) << ", " << res_moment(2) << std::endl;
+            res_moment = hrp::Vector3::Zero();
+            for (size_t i = 0; i < ee_num; i++) {
+                res_moment = res_moment + ref_foot_moment[i] + (ee_pos[0] - ref_zmp).cross(ref_foot_force[i]);
+            }
+            //res_moment = res_moment + (ref_cog - ref_zmp).cross(hrp::Vector3(0, 0, -total_fz));
+            std::cerr << "Total wrench around ref_zmp: " << std::endl;
+            std::cerr << res_force(0) << ", " << res_force(1) << ", " << res_force(2) << ", " << res_moment(0) << ", " << res_moment(1) << ", " << res_moment(2) << std::endl << std::endl;
         }
     };
 #else
