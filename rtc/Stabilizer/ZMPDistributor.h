@@ -58,6 +58,7 @@ class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
     std::vector<Eigen::Vector2d> foot_static_friction_coefficients; // RLEG, LLEG
+    std::vector<double> weight_param_for_qp_weight_matrix;
     std::vector<hrp::dmatrix> ee_matrix_list;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
@@ -68,6 +69,8 @@ public:
     SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5), foot_static_friction_coefficients(4, Eigen::Vector2d(1.0, 1.0)), ee_matrix_list(4, hrp::dmatrix(6, 16))
     {
         alpha_filter = boost::shared_ptr<FirstOrderLowPassFilter<double> >(new FirstOrderLowPassFilter<double>(1e7, _dt, 0.5)); // [Hz], Almost no filter by default
+        for (size_t i = 0; i < 6; i++) { weight_param_for_qp_weight_matrix.push_back(100.0); }
+        weight_param_for_qp_weight_matrix.push_back(0.1);
     };
 
     inline bool is_inside_foot (const hrp::Vector3& leg_pos, const bool is_lleg, const double margin = 0.0)
@@ -131,6 +134,19 @@ public:
         }
         std::cerr << std::endl;
     }
+    void print_weight_param_for_qp (const std::string& str)
+    {
+        std::cerr << "[" << str << "]      ";
+        std::cerr << "Weight param for QP = [" << "w_fx: " << weight_param_for_qp_weight_matrix[0]
+                                               << "w_fy: " << weight_param_for_qp_weight_matrix[1]
+                                               << "w_fz: " << weight_param_for_qp_weight_matrix[2]
+                                               << "w_mx: " << weight_param_for_qp_weight_matrix[3]
+                                               << "w_my: " << weight_param_for_qp_weight_matrix[4]
+                                               << "w_mz: " << weight_param_for_qp_weight_matrix[5]
+                                               << "w_else: " << weight_param_for_qp_weight_matrix[6] << "]";
+        std::cerr << std::endl;
+    }
+
     // Compare Vector2d for sorting lexicographically
     static bool compare_eigen2d(const Eigen::Vector2d& lv, const Eigen::Vector2d& rv)
     {
@@ -267,6 +283,7 @@ public:
       fs_mgn.set_vertices(vec);
     };
     void set_static_friction_coefficients(const std::vector<Eigen::Vector2d>& sfcs) { foot_static_friction_coefficients = sfcs; };
+    void set_weight_param_for_qp(const std::vector<double>& wvec) { weight_param_for_qp_weight_matrix = wvec; };
     // getter
     double get_wrench_alpha_blending () { return wrench_alpha_blending; };
     double get_leg_front_margin () { return leg_front_margin; };
@@ -276,6 +293,7 @@ public:
     double get_alpha_cutoff_freq () { return alpha_filter->getCutOffFreq(); };
     void get_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs.get_vertices(vs); };
     void get_static_friction_coefficients(std::vector<Eigen::Vector2d>& sfcs) { sfcs = foot_static_friction_coefficients; };
+    void get_weight_param_for_qp(std::vector<double>& wvec) { wvec = weight_param_for_qp_weight_matrix; };
     void get_margined_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs_mgn.get_vertices(vs); };
     //
     double calcAlpha (const hrp::Vector3& tmprefzmp,
@@ -866,7 +884,7 @@ public:
         hrp::dvector total_wrench(6);
         double omega2 = total_fz / (ref_cog(2) - ref_zmp(2));
         total_wrench.head(3) = hrp::Vector3(omega2 * (ref_cog(0) - ref_zmp(0)), omega2 * (ref_cog(1) - ref_zmp(1)), total_fz);
-        total_wrench.tail(3) = ref_cog.cross(hrp::Vector3(0, 0, total_mass * gravity));
+        total_wrench.tail(3) = ref_cog.cross((hrp::Vector3)total_wrench.head(3));
 
         if (printp) {
             std::cerr << "fm: ";
@@ -898,8 +916,8 @@ public:
         }
         //TODO: set correct param to Wmat
         for (size_t i = 0; i < state_dim + 6; i++) {
-            if (i < 6) Wmat(i, i) = 1e4;
-            else Wmat(i, i) = 0.1;
+            if (i < 6) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
+            else Wmat(i, i) = weight_param_for_qp_weight_matrix[6];
         }
         Hmat = Phimat.transpose() * Wmat * Phimat;
         gvec = -xivec.transpose() * Wmat * Phimat;
@@ -932,7 +950,7 @@ public:
 
             for (size_t i = 0; i < ee_num; i++) {
                 res_force = res_force + ref_foot_force[i];
-                res_moment = res_moment + ee_pos[i].cross(ref_foot_force[i]) + ref_foot_moment[i];
+                res_moment = res_moment + (ee_pos[i] - ref_cog).cross(ref_foot_force[i]) + ref_foot_moment[i];
                 if (i == 0) std::cerr << "rleg: " << std::endl;
                 else std::cerr << "lleg: " << std::endl;
                 std::cerr << "pos: " << ee_pos[i](0) << ", " << ee_pos[i](1) << ", " << ee_pos[i](2) << std::endl;

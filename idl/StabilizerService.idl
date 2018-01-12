@@ -74,6 +74,20 @@ module OpenHRP
      };
 
     /**
+     * @enum WeightParamForQPWeightMatrix
+     * @brief weight paramter for qp weight matrix
+     */
+     struct WeightParamForQPWeightMatrix {
+        double w_fx;
+        double w_fy;
+        double w_fz;
+        double w_mx;
+        double w_my;
+        double w_mz;
+        double w_else;
+     };
+
+    /**
      * @enum IKLimbParameters
      * @brief IKLimbParameters
      */
@@ -248,6 +262,8 @@ module OpenHRP
       DblArray2 root_rot_compensation_limit;
       /// Whether truncate zmp according to foot support polygon or not
       boolean use_zmp_truncation;
+      /// Weight parameter for QP weight matrix in ZMP distribution.
+      WeightParamForQPWeightMatrix weight_param_for_qp_weight_matrix;
     };
 
     /**

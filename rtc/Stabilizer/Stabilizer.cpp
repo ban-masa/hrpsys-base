@@ -1978,6 +1978,17 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
     i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[0] = static_friction_coefficient_vec[ee_idx](0);
     i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[1] = static_friction_coefficient_vec[ee_idx](1);
   }
+  {
+      std::vector<double> weight_param_vector;
+      szd->get_weight_param_for_qp(weight_param_vector);
+      i_stp.weight_param_for_qp_weight_matrix.w_fx = weight_param_vector[0];
+      i_stp.weight_param_for_qp_weight_matrix.w_fy = weight_param_vector[1];
+      i_stp.weight_param_for_qp_weight_matrix.w_fz = weight_param_vector[2];
+      i_stp.weight_param_for_qp_weight_matrix.w_mx = weight_param_vector[3];
+      i_stp.weight_param_for_qp_weight_matrix.w_my = weight_param_vector[4];
+      i_stp.weight_param_for_qp_weight_matrix.w_mz = weight_param_vector[5];
+      i_stp.weight_param_for_qp_weight_matrix.w_else = weight_param_vector[6];
+  }
 
   i_stp.eefm_cogvel_cutoff_freq = act_cogvel_filter->getCutOffFreq();
   i_stp.eefm_wrench_alpha_blending = szd->get_wrench_alpha_blending();
@@ -2190,6 +2201,19 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
       }
       szd->set_static_friction_coefficients(static_friction_coefficient_vec);
       szd->print_static_friction_coefficients(std::string(m_profile.instance_name));
+  }
+
+  {
+      std::vector<double> weight_param_vector;
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fx);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fy);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fz);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_mx);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_my);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_mz);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_else);
+      szd->set_weight_param_for_qp(weight_param_vector);
+      szd->print_weight_param_for_qp(std::string(m_profile.instance_name));
   }
 
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
