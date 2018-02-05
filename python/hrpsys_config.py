@@ -409,6 +409,8 @@ class HrpsysConfigurator(object):
                 connectPorts(self.rfu.port("refFootOriginExtMomentIsHoldValue"), self.abc.port("refFootOriginExtMomentIsHoldValue"))
             if self.octd:
                 connectPorts(self.abc.port("contactStates"), self.octd.port("contactStates"))
+            connectPorts(self.st.port("icRefWrench"), self.ic.port("stHandRefWrench"))
+            connectPorts(self.st.port("icHandContactStates"), self.ic.port("stHandContactStates"))
 
         # ref force moment connection
         for sen in self.getForceSensorNames():
@@ -905,6 +907,7 @@ class HrpsysConfigurator(object):
             self.connectLoggerPort(self.st, 'currentBasePos')
             self.connectLoggerPort(self.st, 'currentBaseRpy')
             self.connectLoggerPort(self.st, 'debugData')
+            self.connectLoggerPort(self.st, 'allLocalRefWrench')
         if self.el != None:
             self.connectLoggerPort(self.el, 'q')
         if self.rh != None:

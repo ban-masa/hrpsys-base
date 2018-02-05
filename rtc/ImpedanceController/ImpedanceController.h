@@ -121,6 +121,10 @@ class ImpedanceController
   std::vector<InPort<TimedDoubleSeq> *> m_ref_forceIn;
   TimedOrientation3D m_rpy;
   InPort<TimedOrientation3D> m_rpyIn;
+  TimedDoubleSeq m_stHandRefWrench;
+  InPort<TimedDoubleSeq> m_stHandRefWrenchIn;
+  TimedBooleanSeq m_stHandContactStates;
+  InPort<TimedBooleanSeq> m_stHandContactStatesIn;
   
   // </rtc-template>
 
@@ -189,6 +193,8 @@ class ImpedanceController
   int dummy;
   int loop;
   bool use_sh_base_pos_rpy;
+  std::vector<hrp::Vector3> pre_ref_hand_force;
+  std::vector<hrp::Vector3> pre_ref_hand_moment;
 };
 
 

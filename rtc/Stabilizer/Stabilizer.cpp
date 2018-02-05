@@ -96,12 +96,18 @@ Stabilizer::Stabilizer(RTC::Manager* manager)
     m_currentBasePosOut("currentBasePos", m_currentBasePos),
     m_currentBaseRpyOut("currentBaseRpy", m_currentBaseRpy),
     m_allRefWrenchOut("allRefWrench", m_allRefWrench),
+    m_allLocalRefWrenchOut("allLocalRefWrench", m_allLocalRefWrench),
     m_allEECompOut("allEEComp", m_allEEComp),
     m_debugDataOut("debugData", m_debugData),
+    m_icRefWrenchOut("icRefWrench", m_icRefWrench),
+    m_icHandContactStatesOut("icHandContactStates", m_icHandContactStates),
     control_mode(MODE_IDLE),
     st_algorithm(OpenHRP::StabilizerService::TPCC),
     emergency_check_mode(OpenHRP::StabilizerService::NO_CHECK),
     szd(NULL),
+    ref_hand_force(2, hrp::Vector3::Zero()),
+    ref_hand_moment(2, hrp::Vector3::Zero()),
+    hand_contact_list(2, false),
     // </rtc-template>
     m_debugLevel(0)
 {
@@ -160,8 +166,11 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   addOutPort("currentBasePos", m_currentBasePosOut);
   addOutPort("currentBaseRpy", m_currentBaseRpyOut);
   addOutPort("allRefWrench", m_allRefWrenchOut);
+  addOutPort("allLocalRefWrench", m_allLocalRefWrenchOut);
   addOutPort("allEEComp", m_allEECompOut);
   addOutPort("debugData", m_debugDataOut);
+  addOutPort("icHandContactStates", m_icHandContactStatesOut);
+  addOutPort("icRefWrench", m_icRefWrenchOut);
   
   // Set service provider to Ports
   m_StabilizerServicePort.registerProvider("service0", "StabilizerService", m_service0);
@@ -479,8 +488,11 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   m_originActCog.data.x = m_originActCog.data.y = m_originActCog.data.z = 0.0;
   m_originActCogVel.data.x = m_originActCogVel.data.y = m_originActCogVel.data.z = 0.0;
   m_allRefWrench.data.length(stikp.size() * 6); // 6 is wrench dim
+  m_allLocalRefWrench.data.length(stikp.size() * 6); // 6 is wrench dim
   m_allEEComp.data.length(stikp.size() * 6); // 6 is pos+rot dim
   m_debugData.data.length(1); m_debugData.data[0] = 0.0;
+  m_icHandContactStates.data.length(2);
+  m_icRefWrench.data.length(2 * 6);
 
   //
   szd = new SimpleZMPDistributor(dt);
@@ -717,10 +729,14 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
               m_allRefWrench.data[6*i+j+3] = stikp[i].ref_moment(j);
               m_allEEComp.data[6*i+j] = stikp[i].d_foot_pos(j);
               m_allEEComp.data[6*i+j+3] = stikp[i].d_foot_rpy(j);
+              m_allLocalRefWrench.data[6*i+j] = stikp[i].local_ref_force(j);
+              m_allLocalRefWrench.data[6*i+j+3] = stikp[i].local_ref_moment(j);
           }
       }
       m_allRefWrench.tm = m_qRef.tm;
       m_allRefWrenchOut.write();
+      m_allLocalRefWrench.tm = m_qRef.tm;
+      m_allLocalRefWrenchOut.write();
       m_allEEComp.tm = m_qRef.tm;
       m_allEECompOut.write();
       m_actBaseRpy.data.r = act_base_rpy(0);
@@ -740,6 +756,26 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
       m_currentBasePosOut.write();
       m_debugData.tm = m_qRef.tm;
       m_debugDataOut.write();
+
+
+      //TODO
+      for (size_t i = 0; i < hand_contact_list.size(); i++) {
+        if (is_emergency) {
+          m_icHandContactStates.data[i] = false;
+        } else {
+          m_icHandContactStates.data[i] = hand_contact_list[i];
+        }
+      }
+      m_icHandContactStates.tm = m_qRef.tm;
+      m_icHandContactStatesOut.write();
+      for (size_t i = 0; i < ref_hand_force.size(); i++) {
+        for (size_t j = 0; j < 3; j++) {
+          m_icRefWrench.data[6 * i + j] = ref_hand_force[i](j);
+          m_icRefWrench.data[6 * i + j + 3] = ref_hand_moment[i](j);
+        }
+      }
+      m_icRefWrench.tm = m_qRef.tm;
+      m_icRefWrenchOut.write();
     }
     m_qRefOut.write();
     // emergencySignal
@@ -997,6 +1033,42 @@ void Stabilizer::getActualParameters ()
                                                               total_mass, eefm_gravitational_acceleration,
                                                               total_mass * eefm_gravitational_acceleration, ref_contact_states,
                                                               DEBUGP, std::string(m_profile.instance_name));
+      } else if (st_algorithm == OpenHRP::StabilizerService::EEFMQPROPE) {
+          std::vector<hrp::Vector3> act_hand_force(2, hrp::Vector3::Zero());
+          std::vector<hrp::Vector3> act_hand_moment(2, hrp::Vector3::Zero());
+          std::vector<hrp::Vector3> hands_pos(2, hrp::Vector3::Zero());
+          std::vector<hrp::Matrix33> hands_rot(2, hrp::Matrix33::Identity());
+          std::vector<std::string> hands_name(2, "");
+          for (size_t i = 0; i < stikp.size(); i++) {
+            STIKParam& ikp = stikp[i];
+            if (ikp.sensor_name == "rhsensor") {
+              hrp::Link* target = m_robot->link(ikp.target_name);
+              hands_pos[0] = target->p + target->R * ikp.localp;
+              hands_rot[0] = target->R * ikp.localR;
+              hands_name[0] = ikp.ee_name;
+              hrp::Sensor* sensor = m_robot->sensor<hrp::ForceSensor>(ikp.sensor_name);
+              act_hand_force[0] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[0], m_wrenches[i].data[1], m_wrenches[i].data[2]);
+              act_hand_moment[0] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[3], m_wrenches[i].data[4], m_wrenches[i].data[5]);
+            }
+            if (ikp.sensor_name == "lhsensor") {
+              hrp::Link* target = m_robot->link(ikp.target_name);
+              hands_pos[1] = target->p + target->R * ikp.localp;
+              hands_rot[1] = target->R * ikp.localR;
+              hands_name[1] = ikp.ee_name;
+              hrp::Sensor* sensor = m_robot->sensor<hrp::ForceSensor>(ikp.sensor_name);
+              act_hand_force[1] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[0], m_wrenches[i].data[1], m_wrenches[i].data[2]);
+              act_hand_moment[1] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[3], m_wrenches[i].data[4], m_wrenches[i].data[5]);
+            }
+          }
+          szd->distributeZMPToForceMomentsQPAlllimbs(tmp_ref_force, tmp_ref_moment,
+                                                     ref_hand_force, ref_hand_moment,
+                                                     act_hand_force, act_hand_moment,
+                                                     ee_pos, hands_pos, ee_rot, hands_rot,
+                                                     ee_name, hands_name,
+                                                     new_refzmp, hrp::Vector3(foot_origin_rot * act_cog + foot_origin_pos),
+                                                     total_mass, eefm_gravitational_acceleration,
+                                                     total_mass * eefm_gravitational_acceleration, ref_contact_states,
+                                                     hand_contact_list, DEBUGP, std::string(m_profile.instance_name));
       }
       // for debug output
       new_refzmp = foot_origin_rot.transpose() * (new_refzmp - foot_origin_pos);
@@ -1038,6 +1110,8 @@ void Stabilizer::getActualParameters ()
         // Moment limitation
         hrp::Matrix33 ee_R(target->R * ikp.localR);
         ikp.ref_moment = ee_R * vlimit((ee_R.transpose() * ikp.ref_moment), ikp.eefm_ee_moment_limit);
+        ikp.local_ref_force = ee_R.transpose() * tmp_ref_force[idx];
+        ikp.local_ref_moment = ee_R.transpose() * ikp.ref_moment;
         // calcDampingControl
         // d_foot_rpy and d_foot_pos is (actual) foot origin coords relative value because these use foot origin coords relative force & moment
         { // Rot
@@ -1989,6 +2063,10 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
       i_stp.weight_param_for_qp_weight_matrix.w_mz = weight_param_vector[5];
       i_stp.weight_param_for_qp_weight_matrix.w_else = weight_param_vector[6];
   }
+  i_stp.is_hands_grasping.length(hand_contact_list.size());
+  for (size_t i = 0; i < hand_contact_list.size(); i++) {
+      i_stp.is_hands_grasping[i] = hand_contact_list[i];
+  }
 
   i_stp.eefm_cogvel_cutoff_freq = act_cogvel_filter->getCutOffFreq();
   i_stp.eefm_wrench_alpha_blending = szd->get_wrench_alpha_blending();
@@ -2214,6 +2292,10 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
       weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_else);
       szd->set_weight_param_for_qp(weight_param_vector);
       szd->print_weight_param_for_qp(std::string(m_profile.instance_name));
+  }
+
+  {
+    setBoolSequenceParam(hand_contact_list, i_stp.is_hands_grasping, std::string("is_hands_grasping"));
   }
 
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;

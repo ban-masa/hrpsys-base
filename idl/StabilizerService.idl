@@ -23,7 +23,8 @@ module OpenHRP
       EEFMQP,
       EEFMQPCOP,
       EEFMQPCOP2,
-      EEFMQPCM
+      EEFMQPCM,
+      EEFMQPROPE
     };
 
     /**
@@ -264,6 +265,8 @@ module OpenHRP
       boolean use_zmp_truncation;
       /// Weight parameter for QP weight matrix in ZMP distribution.
       WeightParamForQPWeightMatrix weight_param_for_qp_weight_matrix;
+      /// Bool sequence for hands grasp state
+      BoolSequence is_hands_grasping;
     };
 
     /**
