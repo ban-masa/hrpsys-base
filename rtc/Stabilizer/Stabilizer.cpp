@@ -760,7 +760,7 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
 
       //TODO
       for (size_t i = 0; i < hand_contact_list.size(); i++) {
-        if (is_emergency) {
+        if (is_emergency || (control_mode == MODE_IDLE)) {
           m_icHandContactStates.data[i] = false;
         } else {
           m_icHandContactStates.data[i] = hand_contact_list[i];
