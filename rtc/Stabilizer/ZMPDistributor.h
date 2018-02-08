@@ -926,7 +926,7 @@ public:
         total_wrench.head(3) = hrp::Vector3(omega2 * (ref_cog(0) - ref_zmp(0)), omega2 * (ref_cog(1) - ref_zmp(1)), total_fz);
         total_wrench.tail(3) = ref_cog.cross((hrp::Vector3)total_wrench.head(3));
 
-        if (printp) {
+        if (true) {
             std::cerr << "fm: ";
             for (size_t i = 0; i < 6; i++) {
                 std::cerr << total_wrench(i) << " ";
@@ -1054,8 +1054,8 @@ public:
           total_moment = total_moment + hands_pos[i].cross(act_hand_force[i]) + act_hand_moment[i];
         }
       }
-      std::cerr << "total force: " << total_force(0) << " " << total_force(1) << " " << total_force(2) << std::endl;
-      std::cerr << "total moment: " << total_moment(0) << " " << total_moment(1) << " " << total_moment(2) << std::endl;
+      //std::cerr << "total force: " << total_force(0) << " " << total_force(1) << " " << total_force(2) << std::endl;
+      //std::cerr << "total moment: " << total_moment(0) << " " << total_moment(1) << " " << total_moment(2) << std::endl;
       if (grasping_hand_num == 0) {
         return;
       } else if (grasping_hand_num == 1) {
@@ -1070,13 +1070,13 @@ public:
           temp_mat << 0, total_force(2), -total_force(1),
                    -total_force(2), 0, total_force(0),
                    total_force(1), -total_force(0), 0;
-          std::cerr << "temp_mat: " << std::endl;
-          for (size_t y = 0; y < 3; y++) {
-            for (size_t x = 0; x < 3; x++) {
-              std::cerr << temp_mat(y, x) << " ";
-            }
-            std::cerr << std::endl;
-          }
+          //std::cerr << "temp_mat: " << std::endl;
+          //for (size_t y = 0; y < 3; y++) {
+          //  for (size_t x = 0; x < 3; x++) {
+          //    std::cerr << temp_mat(y, x) << " ";
+          //  }
+          //  std::cerr << std::endl;
+          //}
           hrp::dmatrix temp_mat_inv = hrp::dmatrix::Zero(3, 3);
           hrp::calcPseudoInverse((hrp::dmatrix)temp_mat, temp_mat_inv);
           hand_zmp = temp_mat_inv * total_moment;
@@ -1128,20 +1128,20 @@ public:
                       -hands_pos[1](1), hands_pos[1](0), 0;
         cross_mat1 = cross_mat1 - cross_mat0;
         cross_mat2 = cross_mat2 - cross_mat0;
-        std::cerr << "cross_mat1: " << std::endl;
-        for (size_t y = 0; y < 3; y++) {
-          for (size_t x = 0; x < 3; x++) {
-            std::cerr << cross_mat1(y, x) << " ";
-          }
-          std::cerr << std::endl;
-        }
-        std::cerr << "cross_mat2: " << std::endl;
-        for (size_t y = 0; y < 3; y++) {
-          for (size_t x = 0; x < 3; x++) {
-            std::cerr << cross_mat2(y, x) << " ";
-          }
-          std::cerr << std::endl;
-        }
+        //std::cerr << "cross_mat1: " << std::endl;
+        //for (size_t y = 0; y < 3; y++) {
+        //  for (size_t x = 0; x < 3; x++) {
+        //    std::cerr << cross_mat1(y, x) << " ";
+        //  }
+        //  std::cerr << std::endl;
+        //}
+        //std::cerr << "cross_mat2: " << std::endl;
+        //for (size_t y = 0; y < 3; y++) {
+        //  for (size_t x = 0; x < 3; x++) {
+        //    std::cerr << cross_mat2(y, x) << " ";
+        //  }
+        //  std::cerr << std::endl;
+        //}
         hrp::dmatrix A = hrp::dmatrix::Zero(6, 6);
         hrp::dmatrix A_inv = hrp::dmatrix::Zero(6, 6);
         A.block(0, 0, 3, 3) = hrp::dmatrix::Identity(3, 3);
@@ -1163,6 +1163,7 @@ public:
     void distributeZMPToForceMomentsQPAlllimbs (
         std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
         std::vector<hrp::Vector3>& ref_hand_force, std::vector<hrp::Vector3>& ref_hand_moment,
+        const std::vector<hrp::Vector3>& static_ref_hand_force, std::vector<hrp::Vector3>& static_ref_hand_moment,
         const std::vector<hrp::Vector3>& act_hand_force, const std::vector<hrp::Vector3>& act_hand_moment,
         const std::vector<hrp::Vector3>& ee_pos,
         const std::vector<hrp::Vector3>& hands_pos,
@@ -1200,6 +1201,12 @@ public:
       double omega2 = total_fz / (ref_cog(2) - ref_zmp(2));
       total_wrench.head(3) = hrp::Vector3(omega2 * (ref_cog(0) - ref_zmp(0)), omega2 * (ref_cog(1) - ref_zmp(1)), total_fz);
       total_wrench.tail(3) = ref_cog.cross((hrp::Vector3)total_wrench.head(3));
+      for (size_t i = 0; i < hand_contact_list.size(); i++) {
+        if (hand_contact_list[i]) {
+          total_wrench.head(3) = total_wrench.head(3) + static_ref_hand_force[i];
+          total_wrench.tail(3) = total_wrench.tail(3) + hands_pos[i].cross(static_ref_hand_force[i]);
+        }
+      }
     
       size_t cone_dim = 4;//摩擦錘の底面の頂点数
       size_t state_dim = 0;//状態変数のサイズをカウント
@@ -1269,7 +1276,7 @@ public:
             hand_contact_list,
             grasping_hand_num);
       }
-      if (true) {
+      if (printp) {
         std::cerr << "grasping hand num: " << grasping_hand_num << std::endl;
         for (size_t i = 0; i < hands_pos.size(); i++) {
           std::cerr << "hand_pos: " << hands_pos[i](0) << " " << hands_pos[i](1) << " " << hands_pos[i](2) << std::endl;
@@ -1289,6 +1296,28 @@ public:
         if (grasping_hand_num > 0) {
           std::cerr << "rope tension: " << rho_vec(state_dim - 1) << std::endl;
         }
+      }
+      if (printp) {
+        hrp::Vector3 total_f = hrp::Vector3::Zero();
+        hrp::Vector3 total_m = hrp::Vector3::Zero();
+        for (size_t i = 0; i < ee_num; i++) {
+          total_f = total_f + ref_foot_force[i];
+          total_m = total_m + ref_foot_moment[i] + ee_pos[i].cross(ref_foot_force[i]);
+        }
+        for (size_t i = 0; i < hand_contact_list.size(); i++) {
+          if (hand_contact_list[i]) {
+            total_f = total_f + ref_hand_force[i];
+            total_m = total_m + ref_hand_moment[i] + hands_pos[i].cross(ref_hand_force[i]);
+          }
+        }
+        std::cerr << "ref total wrench: ";
+        for (size_t i = 0; i < 6; i++) std::cerr << total_wrench(i) << " ";
+        std::cerr << std::endl;
+        std::cerr << "calc total wrench: ";
+        for (size_t i = 0; i < 3; i++) std::cerr << total_f(i) << " ";
+        for (size_t i = 0; i < 3; i++) std::cerr << total_m(i) << " ";
+        std::cerr << std::endl;
+        std::cerr << std::endl;
       }
     }
 #else

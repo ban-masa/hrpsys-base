@@ -1036,6 +1036,8 @@ void Stabilizer::getActualParameters ()
       } else if (st_algorithm == OpenHRP::StabilizerService::EEFMQPROPE) {
           std::vector<hrp::Vector3> act_hand_force(2, hrp::Vector3::Zero());
           std::vector<hrp::Vector3> act_hand_moment(2, hrp::Vector3::Zero());
+          std::vector<hrp::Vector3> static_ref_hand_force(2, hrp::Vector3::Zero());
+          std::vector<hrp::Vector3> static_ref_hand_moment(2, hrp::Vector3::Zero());
           std::vector<hrp::Vector3> hands_pos(2, hrp::Vector3::Zero());
           std::vector<hrp::Matrix33> hands_rot(2, hrp::Matrix33::Identity());
           std::vector<std::string> hands_name(2, "");
@@ -1049,6 +1051,8 @@ void Stabilizer::getActualParameters ()
               hrp::Sensor* sensor = m_robot->sensor<hrp::ForceSensor>(ikp.sensor_name);
               act_hand_force[0] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[0], m_wrenches[i].data[1], m_wrenches[i].data[2]);
               act_hand_moment[0] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[3], m_wrenches[i].data[4], m_wrenches[i].data[5]);
+              static_ref_hand_force[0] = foot_origin_rot * ref_force[i];
+              static_ref_hand_moment[0] = foot_origin_rot * ref_moment[i];
             }
             if (ikp.sensor_name == "lhsensor") {
               hrp::Link* target = m_robot->link(ikp.target_name);
@@ -1058,10 +1062,13 @@ void Stabilizer::getActualParameters ()
               hrp::Sensor* sensor = m_robot->sensor<hrp::ForceSensor>(ikp.sensor_name);
               act_hand_force[1] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[0], m_wrenches[i].data[1], m_wrenches[i].data[2]);
               act_hand_moment[1] = (sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[3], m_wrenches[i].data[4], m_wrenches[i].data[5]);
+              static_ref_hand_force[1] = foot_origin_rot * ref_force[i];
+              static_ref_hand_moment[1] = foot_origin_rot * ref_moment[i];
             }
           }
           szd->distributeZMPToForceMomentsQPAlllimbs(tmp_ref_force, tmp_ref_moment,
                                                      ref_hand_force, ref_hand_moment,
+                                                     static_ref_hand_force, static_ref_hand_moment,
                                                      act_hand_force, act_hand_moment,
                                                      ee_pos, hands_pos, ee_rot, hands_rot,
                                                      ee_name, hands_name,
