@@ -648,6 +648,7 @@ RTC::ReturnCode_t AutoBalancer::onExecute(RTC::UniqueId ec_id)
       m_walkingStates.tm = m_qRef.tm;
       m_walkingStatesOut.write();
 
+      setHandsRefWrench();
       for (unsigned int i=0; i<m_ref_forceOut.size(); i++){
           m_force[i].tm = m_qRef.tm;
           m_ref_forceOut[i]->write();
@@ -2275,6 +2276,16 @@ void AutoBalancer::distributeReferenceZMPToWrenches (const hrp::Vector3& _ref_zm
         }
         std::cerr << "]" << std::endl;
     }
+};
+
+void AutoBalancer::setHandsRefWrench(void)
+{
+  for (size_t i = 0; i < 3; i++) {
+    m_force[2].data[i] = ref_forces[2](i);
+    m_force[2].data[i + 3] = m_ref_force[2].data[i + 3];
+    m_force[3].data[i] = ref_forces[3](i);
+    m_force[3].data[i + 3] = m_ref_force[3].data[i + 3];
+  }
 };
 
 std::string AutoBalancer::getUseForceModeString ()

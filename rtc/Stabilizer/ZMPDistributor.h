@@ -768,6 +768,11 @@ public:
         for (size_t i = 0; i < state_dim; i++) {
           fret(i) = xOpt[i];
         }
+        std::cerr << "qp result: ";
+        for (size_t i = 0; i < state_dim; i++) {
+          std::cerr << fret(i) << ", ";
+        }
+        std::cerr << std::endl;
         delete[] H;
         delete[] g;
         delete[] lb;
@@ -1276,7 +1281,7 @@ public:
             hand_contact_list,
             grasping_hand_num);
       }
-      if (printp) {
+      if (true) {
         std::cerr << "grasping hand num: " << grasping_hand_num << std::endl;
         for (size_t i = 0; i < hands_pos.size(); i++) {
           std::cerr << "hand_pos: " << hands_pos[i](0) << " " << hands_pos[i](1) << " " << hands_pos[i](2) << std::endl;
@@ -1288,6 +1293,8 @@ public:
           std::cerr << "moment: " << ref_foot_moment[i](0) << " " << ref_foot_moment[i](1) << " " << ref_foot_moment[i](2) << std::endl;
         }
         for (size_t i = 0; i < hand_contact_list.size(); i++) {
+          std::cerr << "static hand ref force: " << static_ref_hand_force[i](0) << " " << static_ref_hand_force[i](1) << " " << static_ref_hand_force[i](2) << std::endl;
+          std::cerr << "static hand ref moment: " << static_ref_hand_moment[i](0) << " " << static_ref_hand_moment[i](1) << " " << static_ref_hand_moment[i](2) << std::endl;
           std::cerr << "ref hand force: " << ref_hand_force[i](0) << " " << ref_hand_force[i](1) << " " << ref_hand_force[i](2) << std::endl;
           std::cerr << "ref hand moment: " << ref_hand_moment[i](0) << " " << ref_hand_moment[i](1) << " " << ref_hand_moment[i](2) << std::endl;
           std::cerr << "act hand force: " << act_hand_force[i](0) << " " << act_hand_force[i](1) << " " << act_hand_force[i](2) << std::endl;
@@ -1297,7 +1304,7 @@ public:
           std::cerr << "rope tension: " << rho_vec(state_dim - 1) << std::endl;
         }
       }
-      if (printp) {
+      if (true) {
         hrp::Vector3 total_f = hrp::Vector3::Zero();
         hrp::Vector3 total_m = hrp::Vector3::Zero();
         for (size_t i = 0; i < ee_num; i++) {

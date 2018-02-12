@@ -239,6 +239,7 @@ class AutoBalancer
       return (std::fabs(m_optionalData.data[contact_states_index_map[ee_name]]-1.0)<0.1)?true:false;
   };
   bool calc_inital_support_legs(const double& y, std::vector<rats::coordinates>& initial_support_legs_coords, std::vector<rats::leg_type>& initial_support_legs, rats::coordinates& start_ref_coords);
+  void setHandsRefWrench(void);
   std::string getUseForceModeString ();
 
   // for gg
