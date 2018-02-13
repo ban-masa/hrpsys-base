@@ -60,6 +60,7 @@ class SimpleZMPDistributor
     std::vector<Eigen::Vector2d> foot_static_friction_coefficients; // RLEG, LLEG
     std::vector<double> weight_param_for_qp_weight_matrix;
     std::vector<hrp::dmatrix> ee_matrix_list;
+    std::vector<hrp::dmatrix> ee_local_contact_matrix_list;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
     std::vector<Eigen::Vector2d> convex_hull;
@@ -489,6 +490,24 @@ public:
         ee_matrix_list[ee_idx] = ee_contact_mat;
     }
 
+    void calcEachLocalContactMatrix (const size_t ee_idx, const std::string& ee_name, const size_t cone_dim)
+    {
+      size_t vs_num = fs.get_vertices_num(ee_idx);
+      hrp::dmatrix ee_contact_mat(6, vs_num * cone_dim);
+      hrp::dmatrix friction_cone_matrix(3, cone_dim);
+      friction_cone_matrix = calcFrictionConeMatrix(foot_static_friction_coefficients[ee_idx], cone_dim);
+      for (size_t i = 0; i < vs_num; i++) {
+        ee_contact_mat.block(0, i * cone_dim, 3, cone_dim) = friction_cone_matrix;
+        Eigen::Vector2d vertex = fs.get_foot_vertex(ee_idx, i);
+        hrp::Matrix33 vertex_cross_product;
+        vertex_cross_product << 0, 0, vertex(1),
+                                0, 0, -vertex(0),
+                                -vertex(1), vertex(0), 0;
+        ee_contact_mat.block(3, i * cone_dim, 3, cone_dim) = vertex_cross_product * friction_cone_matrix;
+      }
+      ee_local_contact_matrix_list[ee_idx] = ee_contact_mat;
+    }
+
     void calcAllContactMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const std::vector<std::string>& ee_name, const size_t cone_dim)
     {
         if (ee_pos.size() != ee_matrix_list.size()) {
@@ -499,6 +518,14 @@ public:
         }
         for (size_t i = 0; i < ee_pos.size(); i++) {
             calcEachContactMatrix(ee_pos[i], ee_rot[i], i, ee_name[i], cone_dim);
+        }
+        if (ee_pos.size() != ee_local_contact_matrix_list.size()) {
+          std::cerr << "calc ee local contact mat" << std::endl;
+          ee_local_contact_matrix_list.clear();
+          for (size_t i = 0; i < ee_pos.size(); i++) {
+            ee_local_contact_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * cone_dim));
+            calcEachLocalContactMatrix(i, ee_name[i], cone_dim);
+          }
         }
     }
 
@@ -1025,12 +1052,15 @@ public:
         }
       }
       if (grasping_hand_num > 0) state_dim++; //For rope state variable
-      Phimat = hrp::dmatrix::Zero(6 + state_dim, state_dim);
-      size_t col_idx = 0;
-      for (size_t i = 0; i < is_contact_list.size(); i++) {
-        if (is_contact_list[i]) {
-          Phimat.block(0, col_idx, 6, ee_matrix_list[i].cols()) = ee_matrix_list[i];
-          col_idx += ee_matrix_list[i].cols();
+      //Phimat = hrp::dmatrix::Zero(6 + state_dim, state_dim);
+      Phimat = hrp::dmatrix::Zero(6 + 3 * ee_contact_num + state_dim, state_dim);
+      {
+        size_t col_idx = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+          if (is_contact_list[i]) {
+            Phimat.block(0, col_idx, 6, ee_matrix_list[i].cols()) = ee_matrix_list[i];
+            col_idx += ee_matrix_list[i].cols();
+          }
         }
       }
     
@@ -1039,7 +1069,23 @@ public:
         hrp::Vector3 temp_vec = hand_zmp.cross(rope_dir);
         for (int i = 0; i < 3; i++) Phimat(i + 3, state_dim - 1) = temp_vec(i);
       }
-      Phimat.block(6, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
+
+      //For Feet CoP
+      {
+        size_t ee_idx = 0;
+        size_t col_idx = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+          if (is_contact_list[i]) {
+            hrp::dmatrix lcmat = ee_local_contact_matrix_list[i].block(3, 0, 3, ee_local_contact_matrix_list[i].cols());
+            Phimat.block(6 + 3 * ee_idx, col_idx, 3, ee_local_contact_matrix_list[i].cols()) = lcmat;
+            ee_idx++;
+            col_idx += ee_local_contact_matrix_list[i].cols();
+          }
+        }
+      }
+
+      //Phimat.block(6, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
+      Phimat.block(6 + 3 * ee_contact_num, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
     }
     
     void calc_hand_zmp_and_rope_dir(hrp::Vector3& hand_zmp, hrp::Vector3& rope_dir,
@@ -1227,9 +1273,9 @@ public:
       calc_hand_zmp_and_rope_dir(hand_zmp, rope_dir,
                                  act_hand_force, act_hand_moment,
                                  hands_pos, hands_rot, hand_contact_list, grasping_hand_num);
-      hrp::dmatrix Phimat = hrp::dmatrix::Zero(6 + state_dim, state_dim);
-      hrp::dvector xivec = hrp::dvector::Zero(6 + state_dim);
-      hrp::dmatrix Wmat = hrp::dmatrix::Zero(6 + state_dim, 6 + state_dim);
+      hrp::dmatrix Phimat = hrp::dmatrix::Zero(6 + 3 * contact_ee_num + state_dim, state_dim);
+      hrp::dvector xivec = hrp::dvector::Zero(6 + 3 * contact_ee_num + state_dim);
+      hrp::dmatrix Wmat = hrp::dmatrix::Zero(6 + 3 * contact_ee_num + state_dim, 6 + 3 * contact_ee_num + state_dim);
       hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
       hrp::dvector gvec = hrp::dvector::Zero(state_dim);
     
@@ -1241,9 +1287,11 @@ public:
         xivec(i) = total_wrench(i);
       }
       //TODO: set correct param to Wmat
-      for (size_t i = 0; i < state_dim + 6; i++) {
+      //for (size_t i = 0; i < state_dim + 6; i++) {
+      for (size_t i = 0; i < state_dim + 6 + 3 * contact_ee_num; i++) {
         if (i < 6) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
-        else Wmat(i, i) = weight_param_for_qp_weight_matrix[6];
+        else if (i < 6 + 3 * contact_ee_num) Wmat(i, i) = weight_param_for_qp_weight_matrix[6];
+        else Wmat(i, i) = 0.001 * weight_param_for_qp_weight_matrix[6];
       }
       Hmat = Phimat.transpose() * Wmat * Phimat;
       gvec = -xivec.transpose() * Wmat * Phimat;
@@ -1281,7 +1329,7 @@ public:
             hand_contact_list,
             grasping_hand_num);
       }
-      if (true) {
+      if (printp) {
         std::cerr << "grasping hand num: " << grasping_hand_num << std::endl;
         for (size_t i = 0; i < hands_pos.size(); i++) {
           std::cerr << "hand_pos: " << hands_pos[i](0) << " " << hands_pos[i](1) << " " << hands_pos[i](2) << std::endl;
@@ -1291,6 +1339,9 @@ public:
         for (size_t i = 0; i < ee_num; i++) {
           std::cerr << "force: " << ref_foot_force[i](0) << " " << ref_foot_force[i](1) << " " << ref_foot_force[i](2) << std::endl;
           std::cerr << "moment: " << ref_foot_moment[i](0) << " " << ref_foot_moment[i](1) << " " << ref_foot_moment[i](2) << std::endl;
+          for (size_t j = 0; j < fs.get_vertices_num(i); j++) {
+
+          }
         }
         for (size_t i = 0; i < hand_contact_list.size(); i++) {
           std::cerr << "static hand ref force: " << static_ref_hand_force[i](0) << " " << static_ref_hand_force[i](1) << " " << static_ref_hand_force[i](2) << std::endl;
@@ -1303,8 +1354,6 @@ public:
         if (grasping_hand_num > 0) {
           std::cerr << "rope tension: " << rho_vec(state_dim - 1) << std::endl;
         }
-      }
-      if (true) {
         hrp::Vector3 total_f = hrp::Vector3::Zero();
         hrp::Vector3 total_m = hrp::Vector3::Zero();
         for (size_t i = 0; i < ee_num; i++) {

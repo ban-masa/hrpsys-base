@@ -2302,7 +2302,7 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
   }
 
   {
-    setBoolSequenceParam(hand_contact_list, i_stp.is_hands_grasping, std::string("is_hands_grasping"));
+    setBoolSequenceParamWhileActive(hand_contact_list, i_stp.is_hands_grasping, std::string("is_hands_grasping"));
   }
 
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
@@ -2549,6 +2549,33 @@ void Stabilizer::setBoolSequenceParam (std::vector<bool>& st_bool_values, const 
   }
   std::cerr << ")" << std::endl;
 };
+
+void Stabilizer::setBoolSequenceParamWhileActive (std::vector<bool>& st_bool_values, const OpenHRP::StabilizerService::BoolSequence& output_bool_values, const std::string& prop_name)
+{
+  std::vector<bool> prev_values;
+  prev_values.resize(st_bool_values.size());
+  copy (st_bool_values.begin(), st_bool_values.end(), prev_values.begin());
+  if (st_bool_values.size() != output_bool_values.length()) {
+      std::cerr << "[" << m_profile.instance_name << "]   " << prop_name << " cannot be set. Length " << st_bool_values.size() << " != " << output_bool_values.length() << std::endl;
+  } else {
+      for (size_t i = 0; i < st_bool_values.size(); i++) {
+          st_bool_values[i] = output_bool_values[i];
+      }
+  }
+  std::cerr << "[" << m_profile.instance_name << "]   " << prop_name << " is ";
+  for (size_t i = 0; i < st_bool_values.size(); i++) {
+      std::cerr <<"[" << st_bool_values[i] << "]";
+  }
+  std::cerr << "(set = ";
+  for (size_t i = 0; i < output_bool_values.length(); i++) {
+      std::cerr <<"[" << output_bool_values[i] << "]";
+  }
+  std::cerr << ", prev = ";
+  for (size_t i = 0; i < prev_values.size(); i++) {
+      std::cerr <<"[" << prev_values[i] << "]";
+  }
+  std::cerr << ")" << std::endl;
+}
 
 void Stabilizer::setBoolSequenceParamWithCheckContact (std::vector<bool>& st_bool_values, const OpenHRP::StabilizerService::BoolSequence& output_bool_values, const std::string& prop_name)
 {
