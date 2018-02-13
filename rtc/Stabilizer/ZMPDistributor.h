@@ -795,11 +795,6 @@ public:
         for (size_t i = 0; i < state_dim; i++) {
           fret(i) = xOpt[i];
         }
-        std::cerr << "qp result: ";
-        for (size_t i = 0; i < state_dim; i++) {
-          std::cerr << fret(i) << ", ";
-        }
-        std::cerr << std::endl;
         delete[] H;
         delete[] g;
         delete[] lb;
