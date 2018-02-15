@@ -15,6 +15,7 @@
 #include "hrpsys/util/VectorConvert.h"
 #include <math.h>
 #include <boost/lambda/lambda.hpp>
+#include <time.h>
 
 typedef coil::Guard<coil::Mutex> Guard;
 

@@ -16,15 +16,19 @@
 #include "../ImpedanceController/JointPathEx.h"
 #include "../TorqueFilter/IIRFilter.h"
 #include <hrpUtil/MatrixSolvers.h>
+#include <time.h>
 
 #ifdef USE_QPOASES
 #include <qpOASES.hpp>
 using namespace qpOASES;
 #endif
 
+#define CONE_DIM 4
+
 class FootSupportPolygon
 {
     std::vector<std::vector<Eigen::Vector2d> > foot_vertices; // RLEG, LLEG
+    std::vector<size_t> foot_vs_num_vector;
 public:
     FootSupportPolygon () {};
     bool inside_foot (size_t idx)
@@ -35,9 +39,16 @@ public:
     {
         return foot_vertices[foot_idx][vtx_idx];
     };
-    void set_vertices (const std::vector<std::vector<Eigen::Vector2d> >& vs) { foot_vertices = vs; };
+    void set_vertices (const std::vector<std::vector<Eigen::Vector2d> >& vs)
+    {
+      foot_vertices = vs;
+      foot_vs_num_vector.clear();
+      for (size_t i = 0; i < vs.size(); i++) {
+        foot_vs_num_vector.push_back((size_t)vs[i].size());
+      }
+    };
     void get_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { vs = foot_vertices; };
-    size_t get_vertices_num (size_t idx) { return foot_vertices[idx].size(); }
+    size_t get_vertices_num (size_t idx) { return foot_vs_num_vector[idx]; }
     void print_vertices (const std::string& str)
     {
         std::cerr << "[" << str << "]     ";
@@ -58,6 +69,7 @@ class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
     std::vector<Eigen::Vector2d> foot_static_friction_coefficients; // RLEG, LLEG
+    std::vector<hrp::dmatrix> friction_cone_matrix_list;
     std::vector<double> weight_param_for_qp_weight_matrix;
     std::vector<hrp::dmatrix> ee_matrix_list;
     std::vector<hrp::dmatrix> ee_local_contact_matrix_list;
@@ -283,7 +295,14 @@ public:
       }
       fs_mgn.set_vertices(vec);
     };
-    void set_static_friction_coefficients(const std::vector<Eigen::Vector2d>& sfcs) { foot_static_friction_coefficients = sfcs; };
+    void set_static_friction_coefficients(const std::vector<Eigen::Vector2d>& sfcs)
+    {
+      foot_static_friction_coefficients = sfcs;
+      friction_cone_matrix_list.clear();
+      for (size_t i = 0; i < sfcs.size(); i++) {
+        friction_cone_matrix_list.push_back(calcFrictionConeMatrix(sfcs[i]));
+      }
+    };
     void set_weight_param_for_qp(const std::vector<double>& wvec) { weight_param_for_qp_weight_matrix = wvec; };
     // getter
     double get_wrench_alpha_blending () { return wrench_alpha_blending; };
@@ -440,11 +459,11 @@ public:
         }
     };
 
-    hrp::dmatrix calcFrictionConeMatrix (const Eigen::Vector2d& mu, const int dim)
+    hrp::dmatrix calcFrictionConeMatrix (const Eigen::Vector2d& mu)
     {
-        hrp::dmatrix cone_matrix = hrp::dmatrix::Zero(3, dim);
-        for (size_t i = 0; i < dim; i++) {
-            double theta = i * 2.0 * M_PI / dim;
+        hrp::dmatrix cone_matrix = hrp::dmatrix::Zero(3, CONE_DIM);
+        for (size_t i = 0; i < CONE_DIM; i++) {
+            double theta = i * 2.0 * M_PI / CONE_DIM;
             cone_matrix(0, i) = mu[0] * std::cos(theta);
             cone_matrix(1, i) = mu[1] * std::sin(theta);
             cone_matrix(2, i) = 1.0;
@@ -457,89 +476,86 @@ public:
         return ee_pos + ee_rot * hrp::Vector3(local_vertex(0), local_vertex(1), 0.0);
     }
 
-    hrp::dmatrix calcWorldFrictionConeMatrix (const hrp::dmatrix& cone_matrix, const hrp::Vector3& world_vertex, const hrp::Matrix33& ee_rot)
+    void calcWorldFrictionConeMatrix (hrp::dmatrix& contact_mat, const hrp::dmatrix& cone_matrix, const hrp::Vector3& world_vertex, const hrp::Matrix33& ee_rot)
     {
-        int dim = cone_matrix.cols();
-        hrp::dmatrix contact_mat(6, dim);
+        contact_mat = hrp::dmatrix(6, CONE_DIM);
         hrp::dmatrix world_cone_matrix = ee_rot * cone_matrix;
-        contact_mat.block(0, 0, 3, dim) = world_cone_matrix;
+        contact_mat.block(0, 0, 3, CONE_DIM) = world_cone_matrix;
         Eigen::Matrix3d vertex_cross_product;
         vertex_cross_product << 0, -world_vertex(2), world_vertex(1),
                                 world_vertex(2), 0, -world_vertex(0),
                                 -world_vertex(1), world_vertex(0), 0;
-        contact_mat.block(3, 0, 3, dim) = vertex_cross_product * world_cone_matrix;
-        return contact_mat;
+        contact_mat.block(3, 0, 3, CONE_DIM) = vertex_cross_product * world_cone_matrix;
     }
 
-    void calcEachContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const size_t ee_idx, const std::string& ee_name, const size_t cone_dim)
+    void calcEachContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const size_t ee_idx, const std::string& ee_name)
     {
         size_t vs_num = fs.get_vertices_num(ee_idx);
-        hrp::dmatrix ee_contact_mat(6, vs_num * cone_dim);
-        hrp::dmatrix friction_cone_matrix(3, cone_dim);
-        friction_cone_matrix = calcFrictionConeMatrix(foot_static_friction_coefficients[ee_idx], cone_dim);
+        hrp::dmatrix ee_contact_mat(6, vs_num * CONE_DIM);
+        hrp::dmatrix& friction_cone_matrix = friction_cone_matrix_list[ee_idx];
         for (size_t i = 0; i < vs_num; i++) {
-            hrp::dmatrix contact_mat(6, cone_dim);
-            contact_mat = calcWorldFrictionConeMatrix(friction_cone_matrix,
-                                                      calcSupportEdge(ee_pos, ee_rot, fs.get_foot_vertex(ee_idx, i)),
-                                                      ee_rot);
-            ee_contact_mat.block(0, i * cone_dim, 6, cone_dim) = contact_mat;
-        }
-        if (ee_matrix_list.size() < ee_idx + 1) {
-            std::cerr << "[" << ee_name << "] Failed to set contact matrix. " << std::endl;
+            hrp::dmatrix contact_mat(6, CONE_DIM);
+            calcWorldFrictionConeMatrix(contact_mat,
+                                        friction_cone_matrix,
+                                        calcSupportEdge(ee_pos, ee_rot, fs.get_foot_vertex(ee_idx, i)),
+                                        ee_rot);
+            ee_contact_mat.block(0, i * CONE_DIM, 6, CONE_DIM) = contact_mat;
         }
         ee_matrix_list[ee_idx] = ee_contact_mat;
     }
 
-    void calcEachLocalContactMatrix (const size_t ee_idx, const std::string& ee_name, const size_t cone_dim)
+    void calcEachLocalContactMatrix (const size_t ee_idx, const std::string& ee_name)
     {
       size_t vs_num = fs.get_vertices_num(ee_idx);
-      hrp::dmatrix ee_contact_mat(6, vs_num * cone_dim);
-      hrp::dmatrix friction_cone_matrix(3, cone_dim);
-      friction_cone_matrix = calcFrictionConeMatrix(foot_static_friction_coefficients[ee_idx], cone_dim);
+      hrp::dmatrix ee_contact_mat(6, vs_num * CONE_DIM);
+      hrp::dmatrix friction_cone_matrix = friction_cone_matrix_list[ee_idx];
       for (size_t i = 0; i < vs_num; i++) {
-        ee_contact_mat.block(0, i * cone_dim, 3, cone_dim) = friction_cone_matrix;
+        ee_contact_mat.block(0, i * CONE_DIM, 3, CONE_DIM) = friction_cone_matrix;
         Eigen::Vector2d vertex = fs.get_foot_vertex(ee_idx, i);
         hrp::Matrix33 vertex_cross_product;
         vertex_cross_product << 0, 0, vertex(1),
                                 0, 0, -vertex(0),
                                 -vertex(1), vertex(0), 0;
-        ee_contact_mat.block(3, i * cone_dim, 3, cone_dim) = vertex_cross_product * friction_cone_matrix;
+        ee_contact_mat.block(3, i * CONE_DIM, 3, CONE_DIM) = vertex_cross_product * friction_cone_matrix;
       }
       ee_local_contact_matrix_list[ee_idx] = ee_contact_mat;
     }
 
-    void calcAllContactMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const std::vector<std::string>& ee_name, const size_t cone_dim)
+    void calcAllContactMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const std::vector<std::string>& ee_name, const size_t ee_num)
     {
         if (ee_pos.size() != ee_matrix_list.size()) {
             ee_matrix_list.clear();
             for (size_t i = 0; i < ee_pos.size(); i++) {
-                ee_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * cone_dim));
+                ee_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * CONE_DIM));
             }
         }
-        for (size_t i = 0; i < ee_pos.size(); i++) {
-            calcEachContactMatrix(ee_pos[i], ee_rot[i], i, ee_name[i], cone_dim);
+        for (size_t i = 0; i < ee_num; i++) {
+            calcEachContactMatrix(ee_pos[i], ee_rot[i], i, ee_name[i]);
         }
+    }
+
+    void calcAllLocalContactMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const std::vector<std::string>& ee_name)
+    {
         if (ee_pos.size() != ee_local_contact_matrix_list.size()) {
-          std::cerr << "calc ee local contact mat" << std::endl;
           ee_local_contact_matrix_list.clear();
           for (size_t i = 0; i < ee_pos.size(); i++) {
-            ee_local_contact_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * cone_dim));
-            calcEachLocalContactMatrix(i, ee_name[i], cone_dim);
+            ee_local_contact_matrix_list.push_back(hrp::dmatrix(6, fs.get_vertices_num(i) * CONE_DIM));
+            calcEachLocalContactMatrix(i, ee_name[i]);
           }
         }
     }
 
-    void set_matrix (hrp::dmatrix& Phimat, const std::vector<bool>& is_contact_list)
+    void set_matrix (hrp::dmatrix& Phimat, const std::vector<bool>& is_contact_list, const size_t ee_num)
     {
         size_t state_dim = 0;
-        for (size_t i = 0; i < is_contact_list.size(); i++) {
+        for (size_t i = 0; i < ee_num; i++) {
             if (is_contact_list[i]) {
                 state_dim += ee_matrix_list[i].cols();
             }
         }
         Phimat = hrp::dmatrix::Zero(state_dim + 6, state_dim);
         size_t col_idx = 0;
-        for (size_t i = 0; i < is_contact_list.size(); i++) {
+        for (size_t i = 0; i < ee_num; i++) {
             if (is_contact_list[i]) {
                 Phimat.block(0, col_idx, 6, ee_matrix_list[i].cols()) = ee_matrix_list[i];
                 col_idx += ee_matrix_list[i].cols();
@@ -961,11 +977,10 @@ public:
             std::cerr << std::endl;
         }
 
-        size_t cone_dim = 4;
         size_t state_dim = 0;
         for (size_t i = 0; i < ee_num; i++) {
             if (is_contact_list[i]) {
-                state_dim += cone_dim * fs.get_vertices_num(i);
+                state_dim += CONE_DIM * fs.get_vertices_num(i);
             }
         }
         hrp::dmatrix Phimat = hrp::dmatrix::Zero(state_dim + 6, state_dim);
@@ -974,8 +989,8 @@ public:
         hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
         hrp::dvector gvec = hrp::dvector::Zero(state_dim);
         
-        calcAllContactMatrix(ee_pos, ee_rot, ee_name, cone_dim);
-        set_matrix(Phimat, is_contact_list);
+        calcAllContactMatrix(ee_pos, ee_rot, ee_name, ee_num);
+        set_matrix(Phimat, is_contact_list, ee_num);
         //TODO: make mode to adapt to force, moment weight vector
     
         for (size_t i = 0; i < 6; i++) {
@@ -992,7 +1007,7 @@ public:
         std::vector<hrp::dvector> rho_vec;
         for (size_t i = 0; i < ee_num; i++) {
             if (is_contact_list[i]) {
-                rho_vec.push_back(hrp::dvector(cone_dim * fs.get_vertices_num(i)));
+                rho_vec.push_back(hrp::dvector(CONE_DIM * fs.get_vertices_num(i)));
             }
         }
 
@@ -1225,7 +1240,7 @@ public:
     {
       size_t ee_num = ee_name.size();
       size_t contact_ee_num = 0;
-      for (size_t i = 0; i < is_contact_list.size(); i++) {//足の着地状態をカウント
+      for (size_t i = 0; i < ee_num; i++) {//足の着地状態をカウント
         if (is_contact_list[i]) contact_ee_num++;
       }
       if (contact_ee_num == 0) {//両足とも接地していないならreturn
@@ -1254,11 +1269,10 @@ public:
         }
       }
     
-      size_t cone_dim = 4;//摩擦錘の底面の頂点数
       size_t state_dim = 0;//状態変数のサイズをカウント
       for (size_t i = 0; i < ee_num; i++) {
         if (is_contact_list[i]) {
-          state_dim += cone_dim * fs.get_vertices_num(i);
+          state_dim += CONE_DIM * fs.get_vertices_num(i);
         }
       }
       if (grasping_hand_num > 0) state_dim++;//把持ハンドがあるならば+1
@@ -1274,7 +1288,8 @@ public:
       hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
       hrp::dvector gvec = hrp::dvector::Zero(state_dim);
     
-      calcAllContactMatrix(ee_pos, ee_rot, ee_name, cone_dim);
+      calcAllContactMatrix(ee_pos, ee_rot, ee_name, ee_num);
+      calcAllLocalContactMatrix(ee_pos, ee_rot, ee_name);
       set_matrix_with_rope(Phimat, is_contact_list, rope_dir, hand_zmp, grasping_hand_num);
       //TODO: make mode to adapt to force, moment weight vector
     
@@ -1298,7 +1313,7 @@ public:
       size_t temp_count = 0;
       for (size_t i = 0; i < ee_num; i++) {
         if (is_contact_list[i]) {
-          size_t state_dim_one = cone_dim * fs.get_vertices_num(i);
+          size_t state_dim_one = CONE_DIM * fs.get_vertices_num(i);
           hrp::dvector temp_state(state_dim_one);
           for (size_t j = 0; j < state_dim_one; j++) {
             temp_state(j) = rho_vec(temp_count);
@@ -1334,9 +1349,6 @@ public:
         for (size_t i = 0; i < ee_num; i++) {
           std::cerr << "force: " << ref_foot_force[i](0) << " " << ref_foot_force[i](1) << " " << ref_foot_force[i](2) << std::endl;
           std::cerr << "moment: " << ref_foot_moment[i](0) << " " << ref_foot_moment[i](1) << " " << ref_foot_moment[i](2) << std::endl;
-          for (size_t j = 0; j < fs.get_vertices_num(i); j++) {
-
-          }
         }
         for (size_t i = 0; i < hand_contact_list.size(); i++) {
           std::cerr << "static hand ref force: " << static_ref_hand_force[i](0) << " " << static_ref_hand_force[i](1) << " " << static_ref_hand_force[i](2) << std::endl;
