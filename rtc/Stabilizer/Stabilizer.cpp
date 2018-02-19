@@ -291,7 +291,7 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
       }
       ikp.avoid_gain = 0.001;
       ikp.reference_gain = 0.01;
-      ikp.ik_loop_count = 3;
+      ikp.ik_loop_count = 1;
       // For swing ee modification
       ikp.target_ee_diff_p = hrp::Vector3::Zero();
       ikp.target_ee_diff_r = hrp::Matrix33::Identity();

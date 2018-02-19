@@ -555,8 +555,8 @@ void ImpedanceController::calcForceMoment ()
                 pre_ref_hand_force[0](j) = ref_data_p(j);
                 pre_ref_hand_moment[0](j) = ref_data_r(j);
               }
-              std::cerr << "[ic] st rarm ref force: ";
-              std::cerr << ref_data_p(0) << " " << ref_data_p(1) << " " << ref_data_p(2) << std::endl;
+              //std::cerr << "[ic] st rarm ref force: ";
+              //std::cerr << ref_data_p(0) << " " << ref_data_p(1) << " " << ref_data_p(2) << std::endl;
             } else if (sensor_name == "lhsensor") {
               for (size_t j = 0; j < 3; j++) {
                 ref_data_p(j) = m_stHandRefWrench.data[6 + j];
@@ -572,8 +572,8 @@ void ImpedanceController::calcForceMoment ()
                 pre_ref_hand_force[1](j) = ref_data_p(j);
                 pre_ref_hand_moment[1](j) = ref_data_r(j);
               }
-              std::cerr << "[ic] st larm ref force: ";
-              std::cerr << ref_data_p(0) << " " << ref_data_p(1) << " " << ref_data_p(2) << std::endl;
+              //std::cerr << "[ic] st larm ref force: ";
+              //std::cerr << ref_data_p(0) << " " << ref_data_p(1) << " " << ref_data_p(2) << std::endl;
             }
           }
 

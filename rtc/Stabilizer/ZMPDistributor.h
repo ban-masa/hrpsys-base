@@ -511,7 +511,7 @@ public:
       hrp::dmatrix friction_cone_matrix = friction_cone_matrix_list[ee_idx];
       for (size_t i = 0; i < vs_num; i++) {
         ee_contact_mat.block(0, i * CONE_DIM, 3, CONE_DIM) = friction_cone_matrix;
-        Eigen::Vector2d vertex = fs.get_foot_vertex(ee_idx, i);
+        Eigen::Vector2d vertex = fs.get_foot_vertex(ee_idx, i) - Eigen::Vector2d(0.05, 0.0);
         hrp::Matrix33 vertex_cross_product;
         vertex_cross_product << 0, 0, vertex(1),
                                 0, 0, -vertex(0),
@@ -1124,7 +1124,8 @@ public:
           if (hand_contact_list[i]) hand_zmp = hands_pos[i];
         }
       } else {
-        if (total_force.norm() < 5.0) {
+        //if (total_force.norm() < 5.0) {
+        if (true) {
           hand_zmp = 0.5 * (hands_pos[0] + hands_pos[1]);
         } else {
           hrp::Matrix33 temp_mat;
@@ -1177,7 +1178,8 @@ public:
           }
         }
       } else if (grasping_hand_num == 2) {
-        hrp::Matrix33 cross_mat0, cross_mat1, cross_mat2;
+        
+		hrp::Matrix33 cross_mat0, cross_mat1, cross_mat2;
         cross_mat0 << 0, -hand_zmp(2), hand_zmp(1),
                       hand_zmp(2), 0, -hand_zmp(0),
                       -hand_zmp(1), hand_zmp(0), 0;
@@ -1218,6 +1220,10 @@ public:
           ref_hand_force[0](i) = ret(i);
           ref_hand_force[1](i) = ret(i + 3);
         }
+		/*
+	  	ref_hand_force[0] = 0.5 * rope_force;
+	  	ref_hand_force[1] = 0.5 * rope_force;
+		*/
       }
     }
     
@@ -1300,9 +1306,10 @@ public:
       //for (size_t i = 0; i < state_dim + 6; i++) {
       for (size_t i = 0; i < state_dim + 6 + 3 * contact_ee_num; i++) {
         if (i < 6) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
-        else if (i < 6 + 3 * contact_ee_num) Wmat(i, i) = weight_param_for_qp_weight_matrix[6];
-        else Wmat(i, i) = 0.001 * weight_param_for_qp_weight_matrix[6];
+        else if (i < 6 + 3 * contact_ee_num) Wmat(i, i) = 2 * weight_param_for_qp_weight_matrix[6];
+        else Wmat(i, i) = 0.01 * weight_param_for_qp_weight_matrix[6];
       }
+	  if (grasping_hand_num > 0) Wmat(Wmat.cols() - 1, Wmat.cols() - 1) = 0.1 * weight_param_for_qp_weight_matrix[6];
       Hmat = Phimat.transpose() * Wmat * Phimat;
       gvec = -xivec.transpose() * Wmat * Phimat;
     
