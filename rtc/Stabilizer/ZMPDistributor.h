@@ -72,6 +72,7 @@ class SimpleZMPDistributor
     std::vector<hrp::dmatrix> friction_cone_matrix_list;
     std::vector<double> weight_param_for_qp_weight_matrix;
     std::vector<hrp::dmatrix> ee_matrix_list;
+    std::vector<hrp::dmatrix> ee_zmp_matrix_list;
     std::vector<hrp::dmatrix> ee_local_contact_matrix_list;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
@@ -504,6 +505,22 @@ public:
         ee_matrix_list[ee_idx] = ee_contact_mat;
     }
 
+    void calcEachZMPMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const size_t ee_idx, const hrp::Vector3& ref_zmp)
+    {
+        size_t vs_num = fs.get_vertices_num(ee_idx);
+        hrp::dmatrix ee_zmp_mat(3, vs_num * CONE_DIM);
+        hrp::dmatrix& friction_cone_matrix = friction_cone_matrix_list[ee_idx];
+        for (size_t i = 0; i < vs_num; i++) {
+            hrp::Vector3 vertex = calcSupportEdge(ee_pos, ee_rot, fs.get_foot_vertex(ee_idx, i)) - ref_zmp;
+            hrp::Matrix33 vertex_cross_product;
+            vertex_cross_product << 0, -vertex(2), vertex(1),
+                                    vertex(2), 0, -vertex(0),
+                                    -vertex(1), vertex(0), 0;
+            ee_zmp_mat.block(0, i * CONE_DIM, 3, CONE_DIM) = vertex_cross_product * ee_rot * friction_cone_matrix;
+        }
+        ee_zmp_matrix_list[ee_idx] = ee_zmp_mat;
+    }
+
     void calcEachLocalContactMatrix (const size_t ee_idx, const std::string& ee_name)
     {
       size_t vs_num = fs.get_vertices_num(ee_idx);
@@ -531,6 +548,19 @@ public:
         }
         for (size_t i = 0; i < ee_num; i++) {
             calcEachContactMatrix(ee_pos[i], ee_rot[i], i, ee_name[i]);
+        }
+    }
+
+    void calcAllZMPMatrix (const std::vector<hrp::Vector3>& ee_pos, const std::vector<hrp::Matrix33>& ee_rot, const hrp::Vector3& ref_zmp, const size_t ee_num)
+    {
+        if (ee_pos.size() != ee_zmp_matrix_list.size()) {
+            ee_zmp_matrix_list.clear();
+            for (size_t i = 0; i < ee_pos.size(); i++) {
+                ee_zmp_matrix_list.push_back(hrp::dmatrix(3, fs.get_vertices_num(i) * CONE_DIM));
+            }
+        }
+        for (size_t i = 0; i < ee_num; i++) {
+            calcEachZMPMatrix(ee_pos[i], ee_rot[i], i, ref_zmp);
         }
     }
 
@@ -1050,7 +1080,7 @@ public:
         }
     };
     void set_matrix_with_rope (
-        hrp::dmatrix& Phimat, const std::vector<bool>& is_contact_list,
+        hrp::dmatrix& Phimat, const std::vector<bool>& is_contact_list, const hrp::Vector3& ref_zmp,
         const hrp::Vector3& rope_dir, const hrp::Vector3& hand_zmp, const size_t grasping_hand_num)
     {
       size_t state_dim = 0;
@@ -1063,7 +1093,7 @@ public:
       }
       if (grasping_hand_num > 0) state_dim++; //For rope state variable
       //Phimat = hrp::dmatrix::Zero(6 + state_dim, state_dim);
-      Phimat = hrp::dmatrix::Zero(6 + 3 * ee_contact_num + state_dim, state_dim);
+      Phimat = hrp::dmatrix::Zero(6 + 3 + state_dim, state_dim);
       {
         size_t col_idx = 0;
         for (size_t i = 0; i < is_contact_list.size(); i++) {
@@ -1081,6 +1111,7 @@ public:
       }
 
       //For Feet CoP
+      /*
       {
         size_t ee_idx = 0;
         size_t col_idx = 0;
@@ -1093,9 +1124,20 @@ public:
           }
         }
       }
+      */
+      //For ZMP
+      {
+        size_t col_idx = 0;
+        for (size_t i = 0; i < is_contact_list.size(); i++) {
+          if (is_contact_list[i]) {
+            Phimat.block(6, col_idx, 3, ee_zmp_matrix_list[i].cols())  = ee_zmp_matrix_list[i];
+            col_idx += ee_zmp_matrix_list[i].cols();
+          }
+        }
+      }
 
       //Phimat.block(6, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
-      Phimat.block(6 + 3 * ee_contact_num, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
+      Phimat.block(6 + 3, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
     }
     
     void calc_hand_zmp_and_rope_dir(hrp::Vector3& hand_zmp, hrp::Vector3& rope_dir,
@@ -1124,7 +1166,9 @@ public:
           if (hand_contact_list[i]) hand_zmp = hands_pos[i];
         }
       } else {
+        hand_zmp = 0.5 * (hands_pos[0] + hands_pos[1]);
         //if (total_force.norm() < 5.0) {
+        /*
         if (true) {
           hand_zmp = 0.5 * (hands_pos[0] + hands_pos[1]);
         } else {
@@ -1143,6 +1187,7 @@ public:
           hrp::calcPseudoInverse((hrp::dmatrix)temp_mat, temp_mat_inv);
           hand_zmp = temp_mat_inv * total_moment;
         }
+        */
       }
       if (total_force.norm() < 5.0) {
         rope_dir = hrp::Vector3(1.0, 0.0, 0.0);
@@ -1178,7 +1223,7 @@ public:
           }
         }
       } else if (grasping_hand_num == 2) {
-        
+        /*
 		hrp::Matrix33 cross_mat0, cross_mat1, cross_mat2;
         cross_mat0 << 0, -hand_zmp(2), hand_zmp(1),
                       hand_zmp(2), 0, -hand_zmp(0),
@@ -1220,10 +1265,9 @@ public:
           ref_hand_force[0](i) = ret(i);
           ref_hand_force[1](i) = ret(i + 3);
         }
-		/*
+        */
 	  	ref_hand_force[0] = 0.5 * rope_force;
 	  	ref_hand_force[1] = 0.5 * rope_force;
-		*/
       }
     }
     
@@ -1288,15 +1332,16 @@ public:
       calc_hand_zmp_and_rope_dir(hand_zmp, rope_dir,
                                  act_hand_force, act_hand_moment,
                                  hands_pos, hands_rot, hand_contact_list, grasping_hand_num);
-      hrp::dmatrix Phimat = hrp::dmatrix::Zero(6 + 3 * contact_ee_num + state_dim, state_dim);
-      hrp::dvector xivec = hrp::dvector::Zero(6 + 3 * contact_ee_num + state_dim);
-      hrp::dmatrix Wmat = hrp::dmatrix::Zero(6 + 3 * contact_ee_num + state_dim, 6 + 3 * contact_ee_num + state_dim);
+      hrp::dmatrix Phimat = hrp::dmatrix::Zero(6 + 3 + state_dim, state_dim);
+      hrp::dvector xivec = hrp::dvector::Zero(6 + 3 + state_dim);
+      hrp::dmatrix Wmat = hrp::dmatrix::Zero(6 + 3 + state_dim, 6 + 3 + state_dim);
       hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
       hrp::dvector gvec = hrp::dvector::Zero(state_dim);
     
       calcAllContactMatrix(ee_pos, ee_rot, ee_name, ee_num);
-      calcAllLocalContactMatrix(ee_pos, ee_rot, ee_name);
-      set_matrix_with_rope(Phimat, is_contact_list, rope_dir, hand_zmp, grasping_hand_num);
+      calcAllZMPMatrix(ee_pos, ee_rot, ref_zmp, ee_num);
+      //calcAllLocalContactMatrix(ee_pos, ee_rot, ee_name);
+      set_matrix_with_rope(Phimat, is_contact_list, ref_zmp, rope_dir, hand_zmp, grasping_hand_num);
       //TODO: make mode to adapt to force, moment weight vector
     
       for (size_t i = 0; i < 6; i++) {
@@ -1304,9 +1349,9 @@ public:
       }
       //TODO: set correct param to Wmat
       //for (size_t i = 0; i < state_dim + 6; i++) {
-      for (size_t i = 0; i < state_dim + 6 + 3 * contact_ee_num; i++) {
+      for (size_t i = 0; i < state_dim + 6 + 3; i++) {
         if (i < 6) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
-        else if (i < 6 + 3 * contact_ee_num) Wmat(i, i) = 2 * weight_param_for_qp_weight_matrix[6];
+        else if (i < 6 + 3) Wmat(i, i) = 1 * weight_param_for_qp_weight_matrix[6];
         else Wmat(i, i) = 0.01 * weight_param_for_qp_weight_matrix[6];
       }
 	  if (grasping_hand_num > 0) Wmat(Wmat.cols() - 1, Wmat.cols() - 1) = 0.1 * weight_param_for_qp_weight_matrix[6];
