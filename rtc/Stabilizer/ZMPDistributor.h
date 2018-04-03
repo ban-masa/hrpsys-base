@@ -1351,7 +1351,7 @@ public:
       //for (size_t i = 0; i < state_dim + 6; i++) {
       for (size_t i = 0; i < state_dim + 6 + 3; i++) {
         if (i < 6) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
-        else if (i < 6 + 3) Wmat(i, i) = 1 * weight_param_for_qp_weight_matrix[6];
+        else if (i < 6 + 3) Wmat(i, i) = 10 * weight_param_for_qp_weight_matrix[6];
         else Wmat(i, i) = 0.01 * weight_param_for_qp_weight_matrix[6];
       }
 	  if (grasping_hand_num > 0) Wmat(Wmat.cols() - 1, Wmat.cols() - 1) = 0.1 * weight_param_for_qp_weight_matrix[6];
