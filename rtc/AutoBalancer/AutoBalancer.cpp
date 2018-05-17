@@ -1510,6 +1510,8 @@ bool AutoBalancer::setGaitGeneratorParam(const OpenHRP::AutoBalancerService::Gai
     gg->set_default_orbit_type(CYCLOIDDELAYKICK);
   } else if (i_param.default_orbit_type == OpenHRP::AutoBalancerService::CROSS) {
     gg->set_default_orbit_type(CROSS);
+  } else if (i_param.default_orbit_type == OpenHRP::AutoBalancerService::LESSIMPACT) {
+    gg->set_default_orbit_type(LESSIMPACT);
   }
   gg->set_swing_trajectory_delay_time_offset(i_param.swing_trajectory_delay_time_offset);
   gg->set_swing_trajectory_final_distance_weight(i_param.swing_trajectory_final_distance_weight);

@@ -2,6 +2,7 @@
 
 #include "GaitGenerator.h"
 #include <numeric>
+#include <cmath>
 
 namespace rats
 {
@@ -34,6 +35,55 @@ namespace rats
       u(2), v(2), 1;
     ret = dvm * cycloid_point + start + uz;
   };
+
+  void less_impact_midpoint(hrp::Vector3& ret,
+                            const double ratio, const hrp::Vector3& start,
+                            const hrp::Vector3& goal, const double height,
+                            const double default_top_ratio, const double default_top_x)
+  {
+    const size_t dim = 8;
+    hrp::Vector3 u (goal - start);
+    hrp::dvector x;
+    x = hrp::dvector::Zero(dim);
+    hrp::dvector z;
+    z = hrp::dvector::Zero(dim);
+    hrp::dvector b;
+    b = hrp::dvector::Zero(dim);
+    hrp::dmatrix A;
+    A = hrp::dmatrix::Zero(dim, dim);
+    b(1) = u(0);
+    b(2) = u(0) * default_top_x;
+    for (size_t i = 0; i < dim; i++) {
+      if (i < dim -3) {
+        A(7, i + 3) = (i + 1) * (i + 2) * (i + 3) * std::pow(default_top_ratio, i);
+      }
+      if (i < dim -2) {
+        A(5, i + 2) = (i + 1) * (i + 2) * std::pow(0.0, i);
+        A(6, i + 2) = (i + 1) * (i + 2) * std::pow(1.0, i);
+      }
+      if (i < dim - 1) {
+        A(3, i + 1) = (i + 1) * std::pow(0.0, i);
+        A(4, i + 1) = (i + 1) * std::pow(1.0, i);
+      }
+      A(0, i) = std::pow(0.0, i);
+      A(1, i) = std::pow(1.0, i);
+      A(2, i) = std::pow(default_top_ratio, i);
+    }
+    x = A.inverse() * b;
+    b(1) = u(2);
+    b(2) = u(2) * default_top_x + height;
+    for (size_t i = 0; i < dim - 1; i++) {
+      A(7, i + 1) = (i + 1) * std::pow(default_top_ratio, i);
+    }
+    z = A.inverse() * b;
+    ret = start;
+    ret(1) += ratio * u(1);
+    for (size_t i = 0; i < dim; i++) {
+      ret(0) += std::pow(ratio, i) * x(i);
+      ret(2) += std::pow(ratio, i) * z(i);
+    }
+  };
+
   void multi_mid_coords (coordinates& ret, const std::vector<coordinates>& cs, const double eps)
   {
       if (cs.size() == 1) {
@@ -303,6 +353,9 @@ namespace rats
       case CROSS:
         cross_delay_midcoords(ret, it1->worldcoords, it2->worldcoords, step_height, it1->l_r);
         break;
+      case LESSIMPACT:
+        lessimpact_midcoords(ret, it1->worldcoords, it2->worldcoords, step_height);
+        break;
       default: break;
       }
       swing_trajectory_generator_idx++;
@@ -459,6 +512,34 @@ namespace rats
   {
     crdtg.set_swing_leg(lr);
     crdtg.get_trajectory_point(ret.pos, hrp::Vector3(start.pos), hrp::Vector3(goal.pos), height);
+  };
+
+  void leg_coords_generator::lessimpact_midcoords (coordinates& ret, const coordinates& start,
+                                                                const coordinates& goal, const double height) const
+  {
+    const double a = 0.3;
+    double grad1 = 1.0 / a;
+    double grad2 = 0.0;
+    hrp::dmatrix A(4, 4);
+    A = hrp::dmatrix::Zero(4, 4);
+    A(0, 3) = 1.0;
+    for (int i = 0; i < 4; i++) A(1, i) = 1.0;
+    A(2, 2) = 1.0;
+    A(3, 0) = 3.0;
+    A(3, 1) = 2.0;
+    A(3, 2) = 1.0;
+    hrp::dvector x(4);
+    hrp::dvector b(4);
+    b(0) = 0.0;
+    b(1) = 1.0;
+    b(2) = grad1;
+    b(3) = grad2;
+    x = A.inverse() * b;
+    double new_ratio = 0.0;
+    for (int i = 0; i < 4; i++) new_ratio += x(i) * std::pow(swing_ratio, 3 - i);
+
+    cycloid_midpoint (ret.pos, new_ratio, start.pos, goal.pos, height, default_top_ratio);
+    //less_impact_midpoint(ret.pos, swing_ratio, start.pos, goal.pos, height, default_top_ratio, 0.5);
   };
 
   bool leg_coords_generator::is_same_footstep_nodes(const std::vector<step_node>& fns_1, const std::vector<step_node>& fns_2) const
