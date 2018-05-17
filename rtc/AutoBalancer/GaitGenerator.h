@@ -20,9 +20,13 @@ namespace rats
                            const double ratio, const hrp::Vector3& start,
                            const hrp::Vector3& goal, const double height,
                            const double default_top_ratio = 0.5);
+    void less_impact_midpoint (hrp::Vector3& ret,
+                               const double ratio, const hrp::Vector3& start,
+                               const hrp::Vector3& goal, const double height,
+                               const double default_top_ratio = 0.5, const double default_top_x = 0.7);
     void multi_mid_coords (coordinates& mid_coords, const std::vector<coordinates>& cs, const double eps = 0.001);
 
-    enum orbit_type {SHUFFLING, CYCLOID, RECTANGLE, STAIR, CYCLOIDDELAY, CYCLOIDDELAYKICK, CROSS};
+    enum orbit_type {SHUFFLING, CYCLOID, RECTANGLE, STAIR, CYCLOIDDELAY, CYCLOIDDELAYKICK, CROSS, LESSIMPACT};
     enum leg_type {RLEG, LLEG, RARM, LARM, BOTH, ALL};
     enum stride_limitation_type {SQUARE, CIRCLE};
     std::string leg_type_to_leg_type_string (const leg_type l_r);
@@ -724,6 +728,8 @@ namespace rats
       double calc_interpolated_toe_heel_angle (const toe_heel_phase start_phase, const toe_heel_phase goal_phase, const double start, const double goal);
       void modif_foot_coords_for_toe_heel_phase (coordinates& org_coords, const double _current_toe_angle, const double _current_heel_angle);
       void cycloid_midcoords (coordinates& ret, const coordinates& start,
+                              const coordinates& goal, const double height) const;
+      void lessimpact_midcoords (coordinates& ret, const coordinates& start,
                               const coordinates& goal, const double height) const;
       void rectangle_midcoords (coordinates& ret, const coordinates& start,
                                 const coordinates& goal, const double height, const size_t swing_trajectory_generator_idx);
@@ -1573,6 +1579,8 @@ namespace rats
             std::cerr << "CYCLOIDDELAYKICK" << std::endl;
         } else if (get_default_orbit_type() == CROSS) {
             std::cerr << "CROSS" << std::endl;
+        } else if (get_default_orbit_type() == LESSIMPACT) {
+            std::cerr << "LESSIMPACT" << std::endl;
         }
         std::cerr << "[" << print_str << "]   swing_trajectory_delay_time_offset = " << get_swing_trajectory_delay_time_offset() << "[s], swing_trajectory_final_distance_weight = " << get_swing_trajectory_final_distance_weight()
                   << ", swing_trajectory_time_offset_xy2z = " << get_swing_trajectory_time_offset_xy2z() << std::endl;

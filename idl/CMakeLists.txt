@@ -29,7 +29,7 @@ set(idl_files
   ReferenceForceUpdaterService.idl
   AccelerationFilterService.idl
   ObjectContactTurnaroundDetectorService.idl
-  #  FrictionEstimatorService.idl
+  PCDLoaderService.idl
   )
 
 set(openhrp_idl_files
