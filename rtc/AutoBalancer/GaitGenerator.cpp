@@ -517,26 +517,16 @@ namespace rats
   void leg_coords_generator::lessimpact_midcoords (coordinates& ret, const coordinates& start,
                                                                 const coordinates& goal, const double height) const
   {
-    const double a = 0.3;
-    double grad1 = 1.0 / a;
-    double grad2 = 0.0;
-    hrp::dmatrix A(4, 4);
-    A = hrp::dmatrix::Zero(4, 4);
-    A(0, 3) = 1.0;
-    for (int i = 0; i < 4; i++) A(1, i) = 1.0;
-    A(2, 2) = 1.0;
-    A(3, 0) = 3.0;
-    A(3, 1) = 2.0;
-    A(3, 2) = 1.0;
-    hrp::dvector x(4);
-    hrp::dvector b(4);
-    b(0) = 0.0;
-    b(1) = 1.0;
-    b(2) = grad1;
-    b(3) = grad2;
-    x = A.inverse() * b;
+    const double prm = 0.01;
+    double t = 1.0 - prm;
+    double a = 1.0 / (2.0 * t - t * t);
+    double tmp = 1.0 - swing_ratio;
     double new_ratio = 0.0;
-    for (int i = 0; i < 4; i++) new_ratio += x(i) * std::pow(swing_ratio, 3 - i);
+    if (tmp < t) {
+      new_ratio = 1.0 - a * tmp * tmp;
+    } else {
+      new_ratio = 1.0 -2.0 * a * t * tmp + a * t * t;
+    }
 
     cycloid_midpoint (ret.pos, new_ratio, start.pos, goal.pos, height, default_top_ratio);
     //less_impact_midpoint(ret.pos, swing_ratio, start.pos, goal.pos, height, default_top_ratio, 0.5);

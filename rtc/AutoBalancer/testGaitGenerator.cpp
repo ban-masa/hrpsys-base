@@ -1262,6 +1262,22 @@ public:
         gen_and_plot_walk_pattern();
     };
 
+    void test21 ()
+    {
+        test_doc_string = "test21 : Set foot steps";
+        /* initialize sample footstep_list */
+        parse_params();
+        std::vector< std::vector<step_node> > fnsl;
+        fnsl.push_back(boost::assign::list_of(step_node("rleg", coordinates(hrp::Vector3(hrp::Vector3(0, 0, 0)+leg_pos[0])), gg->get_default_step_height(), gg->get_default_step_time(), gg->get_toe_angle(), gg->get_heel_angle())));
+        fnsl.push_back(boost::assign::list_of(step_node("lleg", coordinates(hrp::Vector3(hrp::Vector3(0, 0, 0)+leg_pos[1])), gg->get_default_step_height(), gg->get_default_step_time(), gg->get_toe_angle(), gg->get_heel_angle())));
+        fnsl.push_back(boost::assign::list_of(step_node("rleg", coordinates(hrp::Vector3(hrp::Vector3(100*1e-3, 0, 0)+leg_pos[0])), gg->get_default_step_height(), gg->get_default_step_time(), gg->get_toe_angle(), gg->get_heel_angle())));
+        fnsl.push_back(boost::assign::list_of(step_node("lleg", coordinates(hrp::Vector3(hrp::Vector3(200*1e-3, 0, 0)+leg_pos[1])), gg->get_default_step_height(), gg->get_default_step_time(), gg->get_toe_angle(), gg->get_heel_angle())));
+        fnsl.push_back(boost::assign::list_of(step_node("rleg", coordinates(hrp::Vector3(hrp::Vector3(200*1e-3, 0, 0)+leg_pos[0])), gg->get_default_step_height(), gg->get_default_step_time(), gg->get_toe_angle(), gg->get_heel_angle())));
+        gg->set_foot_steps_list(fnsl);
+        gg->set_default_orbit_type(LESSIMPACT);
+        gen_and_plot_walk_pattern();
+    };
+
     void parse_params (bool is_print_doc_setring = true)
     {
       if (is_print_doc_setring) std::cerr << test_doc_string << std::endl;
@@ -1451,6 +1467,8 @@ int main(int argc, char* argv[])
           tgg.test19();
       } else if (std::string(argv[1]) == "--test20") {
           tgg.test20();
+      } else if (std::string(argv[1]) == "--test21") {
+          tgg.test21();
       } else {
           print_usage();
           ret = 1;
