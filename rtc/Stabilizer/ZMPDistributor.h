@@ -16,6 +16,7 @@
 #include "../ImpedanceController/JointPathEx.h"
 #include "../TorqueFilter/IIRFilter.h"
 #include <hrpUtil/MatrixSolvers.h>
+#include "LimbContactConstraint.h"
 
 #ifdef USE_QPOASES
 #include <qpOASES.hpp>
@@ -56,6 +57,8 @@ public:
 class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
+    std::vector<LimbContactConstraintBase*> foot_contact_constraint_list;
+    std::vector<double> weight_param_for_qp_weight_matrix;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
     std::vector<Eigen::Vector2d> convex_hull;
@@ -65,6 +68,13 @@ public:
     SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5)
     {
         alpha_filter = boost::shared_ptr<FirstOrderLowPassFilter<double> >(new FirstOrderLowPassFilter<double>(1e7, _dt, 0.5)); // [Hz], Almost no filter by default
+        foot_contact_constraint_list.push_back(new SimpleLimbContactConstraint(std::string("rleg")));
+        foot_contact_constraint_list.push_back(new SimpleLimbContactConstraint(std::string("lleg")));
+        foot_contact_constraint_list.push_back(new RopeGraspHandContactConstraint(std::string("rarm")));
+        foot_contact_constraint_list.push_back(new RopeGraspHandContactConstraint(std::string("larm")));
+        for (size_t i = 0; i < 6; i++) { weight_param_for_qp_weight_matrix.push_back(100.0); }
+        weight_param_for_qp_weight_matrix.push_back(0.01);
+
     };
 
     inline bool is_inside_foot (const hrp::Vector3& leg_pos, const bool is_lleg, const double margin = 0.0)
@@ -186,6 +196,9 @@ public:
     void set_vertices (const std::vector<std::vector<Eigen::Vector2d> >& vs)
     {
         fs.set_vertices(vs);
+        for (size_t i = 0; i < vs.size(); i++) {
+          foot_contact_constraint_list[i]->set_foot_vertices(vs[i]);
+        }
         // leg_inside_margin = fs.get_foot_vertex(0, 0)(1);
         // leg_front_margin = fs.get_foot_vertex(0, 0)(0);
         // leg_rear_margin = std::fabs(fs.get_foot_vertex(0, 3)(0));
@@ -253,6 +266,20 @@ public:
       }
       fs_mgn.set_vertices(vec);
     };
+    void set_static_friction_coefficients(const std::vector<Eigen::Vector2d>& sfcs)
+    {
+      if (sfcs.size() != foot_contact_constraint_list.size()) {
+        std::cerr << "Friction list size error" << std::endl;
+        return;
+      }
+      for (size_t i = 0; i < sfcs.size(); i++) {
+        foot_contact_constraint_list[i]->set_static_friction_coefficients(sfcs[i]);
+      }
+    };
+    void set_weight_param_for_qp(std::vector<double>& weight_param_vector)
+    {
+      weight_param_for_qp_weight_matrix = weight_param_vector;
+    }
     // getter
     double get_wrench_alpha_blending () { return wrench_alpha_blending; };
     double get_leg_front_margin () { return leg_front_margin; };
@@ -262,6 +289,15 @@ public:
     double get_alpha_cutoff_freq () { return alpha_filter->getCutOffFreq(); };
     void get_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs.get_vertices(vs); };
     void get_margined_vertices (std::vector<std::vector<Eigen::Vector2d> >& vs) { fs_mgn.get_vertices(vs); };
+    void get_static_friction_coefficients(std::vector<Eigen::Vector2d>& sfcs)
+    {
+      for (size_t i = 0; i < foot_contact_constraint_list.size(); i++) {
+        Eigen::Vector2d sfc;
+        foot_contact_constraint_list[i]->get_static_friction_coefficients(sfc);
+        sfcs.push_back(sfc);
+      }
+    }
+    void get_weight_param_for_qp(std::vector<double>& wvec) { wvec = weight_param_for_qp_weight_matrix; };
     //
     double calcAlpha (const hrp::Vector3& tmprefzmp,
                       const std::vector<hrp::Vector3>& ee_pos,
@@ -619,6 +655,46 @@ public:
         delete[] ub;
         delete[] xOpt;
     };
+    void solveForceMomentQPOASES_for_rope (hrp::dvector& fret,
+                                           const size_t state_dim,
+                                           const hrp::dmatrix& Hmat,
+                                           const hrp::dvector& gvec)
+    {
+        real_t* H = new real_t[state_dim*state_dim];
+        real_t* g = new real_t[state_dim];
+        real_t* lb = new real_t[state_dim];
+        real_t* ub = new real_t[state_dim];
+        for (size_t i = 0; i < state_dim; i++) {
+            for (size_t j = 0; j < state_dim; j++) {
+                H[i*state_dim+j] = Hmat(i,j);
+            }
+            g[i] = gvec(i);
+            lb[i] = 0.0;
+            ub[i] = 1e10;
+        }
+        QProblemB example( state_dim );
+        Options options;
+        //options.enableFlippingBounds = BT_FALSE;
+        options.initialStatusBounds = ST_INACTIVE;
+        options.numRefinementSteps = 1;
+        options.enableCholeskyRefactorisation = 1;
+        //options.printLevel = PL_LOW;
+        options.printLevel = PL_NONE;
+        example.setOptions( options );
+        /* Solve first QP. */
+        int nWSR = 10;
+        example.init( H,g,lb,ub, nWSR,0 );
+        real_t* xOpt = new real_t[state_dim];
+        example.getPrimalSolution( xOpt );
+        for (size_t i = 0; i < state_dim; i++) {
+          fret(i) = xOpt[i];
+        }
+        delete[] H;
+        delete[] g;
+        delete[] lb;
+        delete[] ub;
+        delete[] xOpt;
+    };
 
     void distributeZMPToForceMomentsQP (std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
                                         const std::vector<hrp::Vector3>& ee_pos,
@@ -738,6 +814,248 @@ public:
             }
         }
     };
+
+    void distributeZMPToForceMomentsWithFrictionConstraintQP (
+        std::vector<hrp::Vector3>& ref_limb_force, std::vector<hrp::Vector3>& ref_limb_moment,
+        const std::vector<hrp::Vector3>& ee_pos,
+        const std::vector<hrp::Matrix33>& ee_rot,
+        const std::vector<std::string>& ee_name,
+        const hrp::Vector3& new_refzmp, const hrp::Vector3& ref_zmp, const hrp::Vector3& ref_cog,
+        const std::vector<bool>& is_contact_list,
+        const std::vector<bool>& is_feedback_control_enable,
+        const std::vector<hrp::Vector3>& act_forces, const std::vector<hrp::Vector3>& act_moments,
+        const bool use_abc,
+        const double total_fz, const double dt, const bool printp = true, const std::string& print_str = "")
+    {
+      size_t ee_num = ee_name.size();
+      size_t contact_ee_num = 0;
+      for (size_t i = 0; i < ee_num; i++) {
+        if (is_contact_list[i]) contact_ee_num++;
+      }
+      if (contact_ee_num == 0) {
+        for (size_t i = 0; i < ee_num; i++) {
+          ref_limb_force[i] = hrp::Vector3::Zero();
+          ref_limb_moment[i] = hrp::Vector3::Zero();
+        }
+        return;
+      }
+
+      hrp::dvector total_wrench(6);
+      total_wrench = hrp::dvector::Zero(6);
+
+      if (use_abc) {
+        //ABC enable
+        //total force is calculated by LIP model
+        double omega2 = total_fz / (ref_cog(2) - new_refzmp(2));
+        total_wrench.head(3) = hrp::Vector3(omega2 * (ref_cog(0) - new_refzmp(0)), omega2 * (ref_cog(1) - new_refzmp(1)), total_fz);
+        total_wrench.tail(3) = ref_cog.cross((hrp::Vector3)total_wrench.head(3));
+        total_wrench.head(3) = total_wrench.head(3) + ref_limb_force[2] + ref_limb_force[3];
+        total_wrench.tail(3) = total_wrench.tail(3) + ee_pos[2].cross(ref_limb_force[2]) + ee_pos[3].cross(ref_limb_force[3]);
+      } else {
+        //ABC disable
+        //sum of ref_force is total force
+        for (size_t i = 0; i < ref_limb_force.size(); i++) {
+          total_wrench.head(3) = total_wrench.head(3) + ref_limb_force[i];
+          total_wrench.tail(3) = total_wrench.tail(3) + ref_limb_moment[i] + ee_pos[i].cross(ref_limb_force[i]);
+        }
+      }
+      for (size_t i = 0; i < is_feedback_control_enable.size(); i++) {
+        if (!is_feedback_control_enable[i]) {
+          total_wrench.head(3) = total_wrench.head(3) - ref_limb_force[i];
+          total_wrench.tail(3) = total_wrench.tail(3) - ref_limb_moment[i] - ee_pos[i].cross(ref_limb_force[i]);
+        }
+      }
+      size_t state_dim = 0;
+      for (size_t i = 0; i < ee_num; i++) {
+        if (is_contact_list[i] && is_feedback_control_enable[i]) {
+          state_dim += foot_contact_constraint_list[i]->get_state_dim();
+        }
+      }
+
+      size_t wrench_dim = 6;
+      size_t zmp_dim = 3;
+      hrp::dmatrix Phimat = hrp::dmatrix::Zero(wrench_dim + zmp_dim + state_dim, state_dim);
+      hrp::dvector xivec = hrp::dvector::Zero(wrench_dim + zmp_dim + state_dim);
+      hrp::dmatrix Wmat = hrp::dmatrix::Zero(wrench_dim + zmp_dim + state_dim, wrench_dim + zmp_dim + state_dim);
+      hrp::dmatrix Hmat = hrp::dmatrix::Zero(state_dim, state_dim);
+      hrp::dvector gvec = hrp::dvector::Zero(state_dim);
+
+      for (size_t i = 0; i < ee_num; i++) {
+        if ((ee_name[i] == "rleg") || (ee_name[i] == "lleg")) {
+          foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], ee_rot[i]);
+          foot_contact_constraint_list[i]->calcZMPMatrix(ee_pos[i], ee_rot[i], new_refzmp);
+        } else if ((ee_name[i] == "rarm") || (ee_name[i] == "larm")) {
+          foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], act_forces[i].normalized());
+        }
+      }
+
+      {
+        size_t col_idx = 0;
+        for (size_t i = 0; i < ee_name.size(); i++) {
+          if (is_contact_list[i] && is_feedback_control_enable[i]) {
+            hrp::dmatrix contact_mat;
+            foot_contact_constraint_list[i]->get_contact_matrix(contact_mat);
+            Phimat.block(0, col_idx, wrench_dim, contact_mat.cols()) = contact_mat;
+            col_idx += contact_mat.cols();
+          }
+        }
+        if (zmp_dim > 0) {
+        col_idx = 0;
+          for (size_t i = 0; i < ee_name.size(); i++) {
+            if (is_contact_list[i] && is_feedback_control_enable[i]) {
+              hrp::dmatrix zmp_mat;
+              foot_contact_constraint_list[i]->get_zmp_matrix(zmp_mat);
+              Phimat.block(wrench_dim, col_idx, zmp_dim, zmp_mat.cols()) = zmp_mat;
+              col_idx += zmp_mat.cols();
+            }
+          }
+        }
+        Phimat.block(wrench_dim + zmp_dim, 0, state_dim, state_dim) = hrp::dmatrix::Identity(state_dim, state_dim);
+      }
+      for (size_t i = 0; i < 6; i++) {
+        xivec(i) = total_wrench(i);
+      }
+
+      for (size_t i = 0; i < state_dim + wrench_dim + zmp_dim; i++) {
+        if (i < wrench_dim) Wmat(i, i) = weight_param_for_qp_weight_matrix[i];
+        else if (i < wrench_dim + zmp_dim) Wmat(i, i) = 1 * weight_param_for_qp_weight_matrix[6];
+        else Wmat(i, i) = 0.01 * weight_param_for_qp_weight_matrix[6];
+      }
+
+      Hmat = Phimat.transpose() * Wmat * Phimat;
+      gvec = -xivec.transpose() * Wmat * Phimat;
+
+      hrp::dvector rho_vec = hrp::dvector(state_dim);
+
+      solveForceMomentQPOASES_for_rope(rho_vec, state_dim, Hmat, gvec);
+      hrp::dvector tmpv(6);
+      size_t temp_count = 0;
+      for (size_t i = 0; i < ee_num; i++) {
+        if (is_contact_list[i] && is_feedback_control_enable[i]) {
+          size_t state_dim_one = foot_contact_constraint_list[i]->get_state_dim();
+          hrp::dvector temp_state(state_dim_one);
+          for (size_t j = 0; j < state_dim_one; j++) {
+            temp_state(j) = rho_vec(temp_count);
+            temp_count++;
+          }
+          hrp::dmatrix contact_mat;
+          foot_contact_constraint_list[i]->get_contact_matrix(contact_mat);
+          tmpv = contact_mat * temp_state;
+          ref_limb_force[i] = hrp::Vector3(tmpv(0), tmpv(1), tmpv(2));
+          ref_limb_moment[i] = hrp::Vector3(tmpv(3), tmpv(4), tmpv(5)) - ee_pos[i].cross(ref_limb_force[i]);
+        } else {
+          ref_limb_force[i] = hrp::Vector3::Zero();
+          ref_limb_moment[i] = hrp::Vector3::Zero();
+        }
+      }
+      if (false) {
+        static int cnt = 0;
+        cnt++;
+        if (cnt == 10) {
+          cnt = 0;
+          //for (size_t i = 0; i < Phimat.rows(); i++) {
+          //  for (size_t j = 0; j < Phimat.cols(); j++) {
+          //    std::cerr << Phimat(i, j) << " ";
+          //  }
+          //  std::cerr << std::endl;
+          //}
+          std::cerr << "state dim: " << state_dim << std::endl;
+          //std::cerr << "contact list" << std::endl;
+          //for (size_t i = 0; i < is_contact_list.size(); i++) {
+          //  if (is_contact_list[i]) std::cerr << "1 ";
+          //  else std::cerr << "0 ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << "feedback control" << std::endl;
+          //for (size_t i = 0; i < is_feedback_control_enable.size(); i++) {
+          //  if (is_feedback_control_enable[i]) std::cerr << "1 ";
+          //  else std::cerr << "0 ";
+          //}
+          //std::cerr << std::endl;
+          std::cerr << "phimat part" << std::endl;
+          for (size_t i = 0; i < Phimat.rows(); i++) {
+            std::cerr << Phimat(i, state_dim - 1) << " ";
+          }
+          std::cerr << std::endl;
+          std::cerr << "act forces" << std::endl;
+          for (size_t i = 0; i < act_forces.size(); i++) {
+            for (size_t j = 0; j < 3; j++) {
+              std::cerr << act_forces[i](j) << " ";
+            }
+            std::cerr << std::endl;
+          }
+          std::cerr << std::endl;
+
+          //std::cerr << "rleg" << std::endl;
+          //for (size_t i = 0; i < ee_pos[0].size(); i++) {
+          //  std::cerr << ee_pos[0](i) << " ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << "rleg vs" << std::endl;
+          //foot_contact_constraint_list[0]->print_info();
+          //std::cerr << "refcog" << std::endl;
+          //for (size_t i = 0; i < ref_cog.size(); i++) {
+          //  std::cerr << ref_cog(i) << " ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << "xivec" << std::endl;
+          //for (size_t i = 0; i < xivec.size(); i++) {
+          //  std::cerr << xivec(i) << " ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << "weight_param" << std::endl;
+          //for (size_t i = 0; i < weight_param_for_qp_weight_matrix.size(); i++) {
+          //  std::cerr << weight_param_for_qp_weight_matrix[i] << " ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << "Hmat" << std::endl;
+          //for (size_t i = 0; i < Hmat.rows(); i++) {
+          //  for (size_t j = 0; j < Hmat.cols(); j++) {
+          //    std::cerr << Hmat(i, j) << " ";
+          //  }
+          //  std::cerr << std::endl;
+          //}
+          //std::cerr << "Wmat" << std::endl;
+          //for (size_t i = 0; i < Wmat.rows(); i++) {
+          //  for (size_t j = 0; j < Wmat.cols(); j++) {
+          //    std::cerr << Wmat(i, j) << " ";
+          //  }
+          //  std::cerr << std::endl;
+          //}
+          //std::cerr << "gvec" << std::endl;
+          //for (size_t i = 0; i < gvec.size(); i++) {
+          //  std::cerr << gvec(i) << " ";
+          //}
+          //std::cerr << std::endl;
+          //hrp::dvector temp_vector = Phimat * rho_vec;
+          //std::cerr << "ret_vec" << std::endl;
+          //for (size_t i = 0; i < temp_vector.size(); i++) {
+          //  std::cerr << temp_vector(i) << " ";
+          //}
+          //std::cerr << std::endl;
+          //std::cerr << std::endl;
+          std::cerr << "rho_vec" << std::endl;
+          for (size_t i = 0; i < rho_vec.size(); i++) {
+            std::cerr << rho_vec(i) << " ";
+          }
+          std::cerr << std::endl;
+          std::cerr << "total_wrench" << std::endl;
+          for (size_t i = 0; i < 6; i++) {
+            std::cerr << total_wrench(i) << " ";
+          }
+          std::cerr << std::endl;
+          std::cerr << "ref_limb_force" << std::endl;
+          for (size_t i = 0; i < ref_limb_force.size(); i++) {
+            for (size_t j = 0; j < 3; j++) {
+              std::cerr << ref_limb_force[i](j) << " ";
+            }
+            std::cerr << std::endl;
+          }
+          std::cerr << std::endl;
+        }
+      }
+    }
+
 #else
     void distributeZMPToForceMomentsQP (std::vector<hrp::Vector3>& ref_foot_force, std::vector<hrp::Vector3>& ref_foot_moment,
                                         const std::vector<hrp::Vector3>& ee_pos,

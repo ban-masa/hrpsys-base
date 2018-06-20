@@ -102,6 +102,7 @@ Stabilizer::Stabilizer(RTC::Manager* manager)
     st_algorithm(OpenHRP::StabilizerService::TPCC),
     emergency_check_mode(OpenHRP::StabilizerService::NO_CHECK),
     szd(NULL),
+    hand_contact_list(2, false),
     // </rtc-template>
     m_debugLevel(0)
 {
@@ -987,6 +988,66 @@ void Stabilizer::getActualParameters ()
                                                          ee_forcemoment_distribution_weight,
                                                          eefm_gravitational_acceleration * total_mass, dt,
                                                          DEBUGP, std::string(m_profile.instance_name));
+      } else if (st_algorithm == OpenHRP::StabilizerService::EEFMQPCM) {
+        std::vector<hrp::Vector3> act_forces;
+        std::vector<hrp::Vector3> act_moments;
+        std::vector<std::string> tmp_ee_name;
+        std::vector<hrp::Vector3> tmp_ee_pos;
+        std::vector<hrp::Matrix33> tmp_ee_rot;
+        std::vector<hrp::Vector3> ref_limb_force;
+        std::vector<hrp::Vector3> ref_limb_moment;
+        std::vector<bool> tmp_contact_list;
+        for (size_t i = 0; i < stikp.size(); i++) {
+          hrp::Sensor* sensor = m_robot->sensor<hrp::ForceSensor>(stikp[i].sensor_name);
+          act_forces.push_back((sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[0], m_wrenches[i].data[1], m_wrenches[i].data[2]));
+          act_moments.push_back((sensor->link->R * sensor->localR) * hrp::Vector3(m_wrenches[i].data[3], m_wrenches[i].data[4], m_wrenches[i].data[5]));
+          if (stikp[i].ee_name == "rarm") {
+            tmp_contact_list.push_back( ref_contact_states[i] | hand_contact_list[0] );
+          } else if (stikp[i].ee_name == "larm") {
+            tmp_contact_list.push_back( ref_contact_states[i] | hand_contact_list[1] );
+          } else {
+            tmp_contact_list.push_back(ref_contact_states[i]);
+          }
+        }
+        for (size_t i = 0; i < stikp.size(); i++) {
+          bool tmp_flag = true;
+          for (size_t j = 0; j < ee_name.size(); j++) {
+            if (stikp[i].ee_name == ee_name[j]) {
+              tmp_flag = false;
+              tmp_ee_name.push_back(ee_name[j]);
+              tmp_ee_pos.push_back(ee_pos[j]);
+              tmp_ee_rot.push_back(ee_rot[j]);
+              ref_limb_force.push_back(tmp_ref_force[j]);
+              ref_limb_moment.push_back(tmp_ref_moment[j]);
+              break;
+            }
+          }
+          if (tmp_flag) {
+            hrp::Link* target = m_robot->link(stikp[i].target_name);
+            tmp_ee_name.push_back(stikp[i].ee_name);
+            tmp_ee_pos.push_back(target->p + target->R * stikp[i].localp);
+            tmp_ee_rot.push_back(target->R * stikp[i].localR);
+            ref_limb_force.push_back(hrp::Vector3(foot_origin_rot * ref_force[i]));
+            ref_limb_moment.push_back(hrp::Vector3(foot_origin_rot * ref_moment[i]));
+          }
+        }
+        szd->distributeZMPToForceMomentsWithFrictionConstraintQP (
+            ref_limb_force, ref_limb_moment,
+            tmp_ee_pos, tmp_ee_rot, tmp_ee_name,
+            new_refzmp, hrp::Vector3(foot_origin_rot * ref_zmp + foot_origin_pos), hrp::Vector3(foot_origin_rot * ref_cog + foot_origin_pos),
+            tmp_contact_list, is_feedback_control_enable,
+            act_forces, act_moments, true,
+            total_mass * eefm_gravitational_acceleration, dt,
+            DEBUGP, std::string(m_profile.instance_name));
+        for (size_t i = 0; i < ee_name.size(); i++) {
+          for (size_t j = 0; j < stikp.size(); j++) {
+            if(stikp[j].ee_name == ee_name[i]) {
+              tmp_ref_force[i] = ref_limb_force[j];
+              tmp_ref_moment[i] = ref_limb_moment[j];
+              break;
+            }
+          }
+        }
       }
       // for debug output
       new_refzmp = foot_origin_rot.transpose() * (new_refzmp - foot_origin_pos);
@@ -1961,6 +2022,29 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
       }
   }
 
+  std::vector<Eigen::Vector2d> static_friction_coefficient_vec;
+  szd->get_static_friction_coefficients(static_friction_coefficient_vec);
+  i_stp.ee_static_friction_coefficient_sequence.length(static_friction_coefficient_vec.size());
+  for (size_t ee_idx = 0; ee_idx < static_friction_coefficient_vec.size(); ee_idx++) {
+    i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[0] = static_friction_coefficient_vec[ee_idx](0);
+    i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[1] = static_friction_coefficient_vec[ee_idx](1);
+  }
+  {
+      std::vector<double> weight_param_vector;
+      szd->get_weight_param_for_qp(weight_param_vector);
+      i_stp.weight_param_for_qp_weight_matrix.w_fx = weight_param_vector[0];
+      i_stp.weight_param_for_qp_weight_matrix.w_fy = weight_param_vector[1];
+      i_stp.weight_param_for_qp_weight_matrix.w_fz = weight_param_vector[2];
+      i_stp.weight_param_for_qp_weight_matrix.w_mx = weight_param_vector[3];
+      i_stp.weight_param_for_qp_weight_matrix.w_my = weight_param_vector[4];
+      i_stp.weight_param_for_qp_weight_matrix.w_mz = weight_param_vector[5];
+      i_stp.weight_param_for_qp_weight_matrix.w_else = weight_param_vector[6];
+  }
+  i_stp.is_hands_grasping.length(hand_contact_list.size());
+  for (size_t i = 0; i < hand_contact_list.size(); i++) {
+      i_stp.is_hands_grasping[i] = hand_contact_list[i];
+  }
+
   i_stp.eefm_cogvel_cutoff_freq = act_cogvel_filter->getCutOffFreq();
   i_stp.eefm_wrench_alpha_blending = szd->get_wrench_alpha_blending();
   i_stp.eefm_alpha_cutoff_freq = szd->get_alpha_cutoff_freq();
@@ -2161,6 +2245,36 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
       szd->set_vertices(support_polygon_vec);
       szd->print_vertices(std::string(m_profile.instance_name));
   }
+
+  if (i_stp.ee_static_friction_coefficient_sequence.length() != stikp.size()) {
+      std::cerr << "[" << m_profile.instance_name << "]   ee_static_friction_coefficient_sequence cannot be set. Length " << i_stp.ee_static_friction_coefficient_sequence.length() << " != " << stikp.size() << std::endl;
+  } else {
+      std::cerr << "[" << m_profile.instance_name << "]   ee_static_friction_coefficient_sequence set" << std::endl;
+      std::vector<Eigen::Vector2d> static_friction_coefficient_vec;
+      for (size_t ee_idx = 0; ee_idx < i_stp.ee_static_friction_coefficient_sequence.length(); ee_idx++) {
+          static_friction_coefficient_vec.push_back(Eigen::Vector2d(i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[0], i_stp.ee_static_friction_coefficient_sequence[ee_idx].mu[1]));
+      }
+      szd->set_static_friction_coefficients(static_friction_coefficient_vec);
+      //szd->print_static_friction_coefficients(std::string(m_profile.instance_name));
+  }
+
+  {
+      std::vector<double> weight_param_vector;
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fx);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fy);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_fz);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_mx);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_my);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_mz);
+      weight_param_vector.push_back(i_stp.weight_param_for_qp_weight_matrix.w_else);
+      szd->set_weight_param_for_qp(weight_param_vector);
+      //szd->print_weight_param_for_qp(std::string(m_profile.instance_name));
+  }
+
+  {
+    setBoolSequenceParamWhileActive(hand_contact_list, i_stp.is_hands_grasping, std::string("is_hands_grasping"));
+  }
+
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
   eefm_use_swing_damping = i_stp.eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {
@@ -2450,6 +2564,33 @@ void Stabilizer::setBoolSequenceParamWithCheckContact (std::vector<bool>& st_boo
   }
   std::cerr << ")" << std::endl;
 };
+
+void Stabilizer::setBoolSequenceParamWhileActive (std::vector<bool>& st_bool_values, const OpenHRP::StabilizerService::BoolSequence& output_bool_values, const std::string& prop_name)
+{
+  std::vector<bool> prev_values;
+  prev_values.resize(st_bool_values.size());
+  copy (st_bool_values.begin(), st_bool_values.end(), prev_values.begin());
+  if (st_bool_values.size() != output_bool_values.length()) {
+      std::cerr << "[" << m_profile.instance_name << "]   " << prop_name << " cannot be set. Length " << st_bool_values.size() << " != " << output_bool_values.length() << std::endl;
+  } else {
+      for (size_t i = 0; i < st_bool_values.size(); i++) {
+          st_bool_values[i] = output_bool_values[i];
+      }
+  }
+  std::cerr << "[" << m_profile.instance_name << "]   " << prop_name << " is ";
+  for (size_t i = 0; i < st_bool_values.size(); i++) {
+      std::cerr <<"[" << st_bool_values[i] << "]";
+  }
+  std::cerr << "(set = ";
+  for (size_t i = 0; i < output_bool_values.length(); i++) {
+      std::cerr <<"[" << output_bool_values[i] << "]";
+  }
+  std::cerr << ", prev = ";
+  for (size_t i = 0; i < prev_values.size(); i++) {
+      std::cerr <<"[" << prev_values[i] << "]";
+  }
+  std::cerr << ")" << std::endl;
+}
 
 void Stabilizer::waitSTTransition()
 {

@@ -22,7 +22,8 @@ module OpenHRP
       EEFM,
       EEFMQP,
       EEFMQPCOP,
-      EEFMQPCOP2
+      EEFMQPCOP2,
+      EEFMQPCM
     };
 
     /**
@@ -62,6 +63,28 @@ module OpenHRP
      */
     struct SupportPolygonVertices {
         sequence<TwoDimensionVertex> vertices;
+    };
+
+
+    /**
+     * @enum StaticFrictionCoefficient
+     * @brief Static friction coefficient
+     */
+    struct StaticFrictionCoefficient {
+        DblArray2 mu;
+    };
+    /**
+     * @enum WeightParamForQPWeightMatrix
+     * @brief weight parameter for qp weight matrix
+     */
+    struct WeightParamForQPWeightMatrix {
+      double w_fx;
+      double w_fy;
+      double w_fz;
+      double w_mx;
+      double w_my;
+      double w_mz;
+      double w_else;
     };
 
     /**
@@ -237,6 +260,12 @@ module OpenHRP
       DblArray2 root_rot_compensation_limit;
       /// Whether truncate zmp according to foot support polygon or not
       boolean use_zmp_truncation;
+      /// Sequence of static friction coefficient for all end effectors assuming that the order is (rleg, lleg, rarm, larm)
+      sequence< StaticFrictionCoefficient > ee_static_friction_coefficient_sequence;
+      /// Weight parameter for QP weight matrix in ZMP distribution
+      WeightParamForQPWeightMatrix weight_param_for_qp_weight_matrix;
+      /// Bool sequence for hands grasp state
+      BoolSequence is_hands_grasping;
     };
 
     /**
