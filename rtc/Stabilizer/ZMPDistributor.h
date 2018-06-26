@@ -76,6 +76,12 @@ public:
         weight_param_for_qp_weight_matrix.push_back(0.01);
 
     };
+    ~SimpleZMPDistributor ()
+    {
+      for (size_t i = 0; i < foot_contact_constraint_list.size(); i++) {
+        delete foot_contact_constraint_list[i];
+      }
+    }
 
     inline bool is_inside_foot (const hrp::Vector3& leg_pos, const bool is_lleg, const double margin = 0.0)
     {
@@ -830,18 +836,20 @@ public:
       size_t ee_num = ee_name.size();
       size_t contact_ee_num = 0;
       for (size_t i = 0; i < ee_num; i++) {
-        if (is_contact_list[i]) contact_ee_num++;
+        if (is_contact_list[i] && is_feedback_control_enable[i]) contact_ee_num++;
       }
       if (contact_ee_num == 0) {
         for (size_t i = 0; i < ee_num; i++) {
-          ref_limb_force[i] = hrp::Vector3::Zero();
+          ref_limb_force[i] = hrp::Vector3(0, 0, 0.5 * total_fz);
           ref_limb_moment[i] = hrp::Vector3::Zero();
         }
         return;
       }
 
-      hrp::dvector total_wrench(6);
-      total_wrench = hrp::dvector::Zero(6);
+      size_t wrench_dim = 6;
+      size_t zmp_dim = 3;
+      hrp::dvector total_wrench(wrench_dim);
+      total_wrench = hrp::dvector::Zero(wrench_dim);
 
       if (use_abc) {
         //ABC enable
@@ -872,8 +880,6 @@ public:
         }
       }
 
-      size_t wrench_dim = 6;
-      size_t zmp_dim = 3;
       hrp::dmatrix Phimat = hrp::dmatrix::Zero(wrench_dim + zmp_dim + state_dim, state_dim);
       hrp::dvector xivec = hrp::dvector::Zero(wrench_dim + zmp_dim + state_dim);
       hrp::dmatrix Wmat = hrp::dmatrix::Zero(wrench_dim + zmp_dim + state_dim, wrench_dim + zmp_dim + state_dim);
@@ -881,11 +887,13 @@ public:
       hrp::dvector gvec = hrp::dvector::Zero(state_dim);
 
       for (size_t i = 0; i < ee_num; i++) {
-        if ((ee_name[i] == "rleg") || (ee_name[i] == "lleg")) {
-          foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], ee_rot[i]);
-          foot_contact_constraint_list[i]->calcZMPMatrix(ee_pos[i], ee_rot[i], new_refzmp);
-        } else if ((ee_name[i] == "rarm") || (ee_name[i] == "larm")) {
-          foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], act_forces[i].normalized());
+        if (is_contact_list[i] && is_feedback_control_enable[i]) {
+          if ((ee_name[i] == "rleg") || (ee_name[i] == "lleg")) {
+            foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], ee_rot[i]);
+            foot_contact_constraint_list[i]->calcZMPMatrix(ee_pos[i], ee_rot[i], new_refzmp);
+          } else if ((ee_name[i] == "rarm") || (ee_name[i] == "larm")) {
+            foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], act_forces[i].normalized());
+          }
         }
       }
 

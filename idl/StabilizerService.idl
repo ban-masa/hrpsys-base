@@ -266,6 +266,8 @@ module OpenHRP
       WeightParamForQPWeightMatrix weight_param_for_qp_weight_matrix;
       /// Bool sequence for hands grasp state
       BoolSequence is_hands_grasping;
+      /// Use force difference control or each limb force control. True by default.
+      boolean hand_impedance_control;
     };
 
     /**

@@ -415,6 +415,7 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   limb_stretch_avoidance_vlimit[1] = 50 * 1e-3 * dt; // upper limit
   root_rot_compensation_limit[0] = root_rot_compensation_limit[1] = deg2rad(90.0);
   detection_count_to_air = static_cast<int>(0.0 / dt);
+  hand_impedance_control = false;
 
   // parameters for RUNST
   double ke = 0, tc = 0;
@@ -1102,6 +1103,11 @@ void Stabilizer::getActualParameters ()
           ikp.d_foot_rpy = vlimit(ikp.d_foot_rpy, -1 * ikp.eefm_rot_compensation_limit, ikp.eefm_rot_compensation_limit);
         }
         if (!eefm_use_force_difference_control) { // Pos
+            hrp::Vector3 tmp_damping_gain = (1-transition_smooth_gain) * ikp.eefm_pos_damping_gain * 10 + transition_smooth_gain * ikp.eefm_pos_damping_gain;
+            ikp.d_foot_pos = calcDampingControl(ikp.ref_force, sensor_force, ikp.d_foot_pos, tmp_damping_gain, ikp.eefm_pos_time_const_support);
+            ikp.d_foot_pos = vlimit(ikp.d_foot_pos, -1 * ikp.eefm_pos_compensation_limit, ikp.eefm_pos_compensation_limit);
+        }
+        if (hand_impedance_control && (ikp.ee_name == "rarm" || ikp.ee_name == "larm")) {
             hrp::Vector3 tmp_damping_gain = (1-transition_smooth_gain) * ikp.eefm_pos_damping_gain * 10 + transition_smooth_gain * ikp.eefm_pos_damping_gain;
             ikp.d_foot_pos = calcDampingControl(ikp.ref_force, sensor_force, ikp.d_foot_pos, tmp_damping_gain, ikp.eefm_pos_time_const_support);
             ikp.d_foot_pos = vlimit(ikp.d_foot_pos, -1 * ikp.eefm_pos_compensation_limit, ikp.eefm_pos_compensation_limit);
@@ -2051,6 +2057,7 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
   i_stp.eefm_gravitational_acceleration = eefm_gravitational_acceleration;
   i_stp.eefm_ee_error_cutoff_freq = stikp[0].target_ee_diff_p_filter->getCutOffFreq();
   i_stp.eefm_use_force_difference_control = eefm_use_force_difference_control;
+  i_stp.hand_impedance_control = hand_impedance_control;
   i_stp.eefm_use_swing_damping = eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {
       i_stp.eefm_swing_damping_force_thre[i] = eefm_swing_damping_force_thre[i];
@@ -2276,6 +2283,7 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
   }
 
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
+  hand_impedance_control = i_stp.hand_impedance_control;
   eefm_use_swing_damping = i_stp.eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {
       eefm_swing_damping_force_thre[i] = i_stp.eefm_swing_damping_force_thre[i];
