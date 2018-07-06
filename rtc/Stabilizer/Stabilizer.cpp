@@ -96,8 +96,11 @@ Stabilizer::Stabilizer(RTC::Manager* manager)
     m_currentBasePosOut("currentBasePos", m_currentBasePos),
     m_currentBaseRpyOut("currentBaseRpy", m_currentBaseRpy),
     m_allRefWrenchOut("allRefWrench", m_allRefWrench),
+    m_allLocalRefWrenchOut("allLocalRefWrench", m_allLocalRefWrench),
     m_allEECompOut("allEEComp", m_allEEComp),
     m_debugDataOut("debugData", m_debugData),
+    m_icRefWrenchOut("icRefWrench", m_icRefWrench),
+    m_icHandContactStatesOut("icHandContactStates", m_icHandContactStates),
     control_mode(MODE_IDLE),
     st_algorithm(OpenHRP::StabilizerService::TPCC),
     emergency_check_mode(OpenHRP::StabilizerService::NO_CHECK),
@@ -161,8 +164,11 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   addOutPort("currentBasePos", m_currentBasePosOut);
   addOutPort("currentBaseRpy", m_currentBaseRpyOut);
   addOutPort("allRefWrench", m_allRefWrenchOut);
+  addOutPort("allLocalRefWrench", m_allLocalRefWrenchOut);
   addOutPort("allEEComp", m_allEECompOut);
   addOutPort("debugData", m_debugDataOut);
+  addOutPort("icHandContactStates", m_icHandContactStatesOut);
+  addOutPort("icRefWrench", m_icRefWrenchOut);
   
   // Set service provider to Ports
   m_StabilizerServicePort.registerProvider("service0", "StabilizerService", m_service0);
@@ -415,7 +421,6 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   limb_stretch_avoidance_vlimit[1] = 50 * 1e-3 * dt; // upper limit
   root_rot_compensation_limit[0] = root_rot_compensation_limit[1] = deg2rad(90.0);
   detection_count_to_air = static_cast<int>(0.0 / dt);
-  hand_impedance_control = false;
 
   // parameters for RUNST
   double ke = 0, tc = 0;
@@ -481,8 +486,11 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   m_originActCog.data.x = m_originActCog.data.y = m_originActCog.data.z = 0.0;
   m_originActCogVel.data.x = m_originActCogVel.data.y = m_originActCogVel.data.z = 0.0;
   m_allRefWrench.data.length(stikp.size() * 6); // 6 is wrench dim
+  m_allLocalRefWrench.data.length(stikp.size() * 6);
   m_allEEComp.data.length(stikp.size() * 6); // 6 is pos+rot dim
   m_debugData.data.length(1); m_debugData.data[0] = 0.0;
+  m_icHandContactStates.data.length(2);
+  m_icRefWrench.data.length(2 * 6);
 
   //
   szd = new SimpleZMPDistributor(dt);
@@ -719,10 +727,14 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
               m_allRefWrench.data[6*i+j+3] = stikp[i].ref_moment(j);
               m_allEEComp.data[6*i+j] = stikp[i].d_foot_pos(j);
               m_allEEComp.data[6*i+j+3] = stikp[i].d_foot_rpy(j);
+              m_allLocalRefWrench.data[6*i+j] = stikp[i].local_ref_force(j);
+              m_allLocalRefWrench.data[6*i+j+3] = stikp[i].local_ref_moment(j);
           }
       }
       m_allRefWrench.tm = m_qRef.tm;
       m_allRefWrenchOut.write();
+      m_allLocalRefWrench.tm = m_qRef.tm;
+      m_allLocalRefWrenchOut.write();
       m_allEEComp.tm = m_qRef.tm;
       m_allEECompOut.write();
       m_actBaseRpy.data.r = act_base_rpy(0);
@@ -742,6 +754,24 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
       m_currentBasePosOut.write();
       m_debugData.tm = m_qRef.tm;
       m_debugDataOut.write();
+
+      for (size_t i = 0; i < hand_contact_list.size(); i++) {
+        if (is_emergency || (control_mode != MODE_ST)) {
+          m_icHandContactStates.data[i] = false;
+        } else {
+          m_icHandContactStates.data[i] = hand_contact_list[i];
+        }
+      }
+      m_icHandContactStates.tm = m_qRef.tm;
+      m_icHandContactStatesOut.write();
+      for (size_t i = 0; i < hand_contact_list.size(); i++) {
+        for (size_t j = 0; j < 3; j++) {
+          m_icRefWrench.data[6 * i + j] = stikp[2 + i].ref_force(j);
+          m_icRefWrench.data[6 * i + j + 3] = stikp[2 + i].ref_moment(j);
+        }
+      }
+      m_icRefWrench.tm = m_qRef.tm;
+      m_icRefWrenchOut.write();
     }
     m_qRefOut.write();
     // emergencySignal
@@ -1090,6 +1120,8 @@ void Stabilizer::getActualParameters ()
         // Moment limitation
         hrp::Matrix33 ee_R(target->R * ikp.localR);
         ikp.ref_moment = ee_R * vlimit((ee_R.transpose() * ikp.ref_moment), ikp.eefm_ee_moment_limit);
+        ikp.local_ref_force = ee_R.transpose() * foot_origin_rot * ikp.ref_force;
+        ikp.local_ref_moment = ee_R.transpose() * foot_origin_rot * ikp.ref_moment;
         // calcDampingControl
         // d_foot_rpy and d_foot_pos is (actual) foot origin coords relative value because these use foot origin coords relative force & moment
         { // Rot
@@ -1103,11 +1135,6 @@ void Stabilizer::getActualParameters ()
           ikp.d_foot_rpy = vlimit(ikp.d_foot_rpy, -1 * ikp.eefm_rot_compensation_limit, ikp.eefm_rot_compensation_limit);
         }
         if (!eefm_use_force_difference_control) { // Pos
-            hrp::Vector3 tmp_damping_gain = (1-transition_smooth_gain) * ikp.eefm_pos_damping_gain * 10 + transition_smooth_gain * ikp.eefm_pos_damping_gain;
-            ikp.d_foot_pos = calcDampingControl(ikp.ref_force, sensor_force, ikp.d_foot_pos, tmp_damping_gain, ikp.eefm_pos_time_const_support);
-            ikp.d_foot_pos = vlimit(ikp.d_foot_pos, -1 * ikp.eefm_pos_compensation_limit, ikp.eefm_pos_compensation_limit);
-        }
-        if (hand_impedance_control && (ikp.ee_name == "rarm" || ikp.ee_name == "larm")) {
             hrp::Vector3 tmp_damping_gain = (1-transition_smooth_gain) * ikp.eefm_pos_damping_gain * 10 + transition_smooth_gain * ikp.eefm_pos_damping_gain;
             ikp.d_foot_pos = calcDampingControl(ikp.ref_force, sensor_force, ikp.d_foot_pos, tmp_damping_gain, ikp.eefm_pos_time_const_support);
             ikp.d_foot_pos = vlimit(ikp.d_foot_pos, -1 * ikp.eefm_pos_compensation_limit, ikp.eefm_pos_compensation_limit);
@@ -2057,7 +2084,6 @@ void Stabilizer::getParameter(OpenHRP::StabilizerService::stParam& i_stp)
   i_stp.eefm_gravitational_acceleration = eefm_gravitational_acceleration;
   i_stp.eefm_ee_error_cutoff_freq = stikp[0].target_ee_diff_p_filter->getCutOffFreq();
   i_stp.eefm_use_force_difference_control = eefm_use_force_difference_control;
-  i_stp.hand_impedance_control = hand_impedance_control;
   i_stp.eefm_use_swing_damping = eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {
       i_stp.eefm_swing_damping_force_thre[i] = eefm_swing_damping_force_thre[i];
@@ -2283,7 +2309,6 @@ void Stabilizer::setParameter(const OpenHRP::StabilizerService::stParam& i_stp)
   }
 
   eefm_use_force_difference_control = i_stp.eefm_use_force_difference_control;
-  hand_impedance_control = i_stp.hand_impedance_control;
   eefm_use_swing_damping = i_stp.eefm_use_swing_damping;
   for (size_t i = 0; i < 3; ++i) {
       eefm_swing_damping_force_thre[i] = i_stp.eefm_swing_damping_force_thre[i];

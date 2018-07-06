@@ -49,13 +49,17 @@ ImpedanceController::ImpedanceController(RTC::Manager* manager)
       m_basePosIn("basePosIn", m_basePos),
       m_baseRpyIn("baseRpyIn", m_baseRpy),
       m_rpyIn("rpy", m_rpy),
+      m_stHandRefWrenchIn("stHandRefWrench", m_stHandRefWrench),
+      m_stHandContactStatesIn("stHandContactStates", m_stHandContactStates),
       m_qOut("q", m_q),
       m_ImpedanceControllerServicePort("ImpedanceControllerService"),
       // </rtc-template>
       m_robot(hrp::BodyPtr()),
       m_debugLevel(0),
       dummy(0),
-      use_sh_base_pos_rpy(false)
+      use_sh_base_pos_rpy(false),
+      pre_ref_hand_force(2, hrp::Vector3::Zero()),
+      pre_ref_hand_moment(2, hrp::Vector3::Zero())
 {
     m_service0.impedance(this);
 }
@@ -78,6 +82,8 @@ RTC::ReturnCode_t ImpedanceController::onInitialize()
     addInPort("basePosIn", m_basePosIn);
     addInPort("baseRpyIn", m_baseRpyIn);
     addInPort("rpy", m_rpyIn);
+    addInPort("stHandRefWrench", m_stHandRefWrenchIn);
+    addInPort("stHandContactStates", m_stHandContactStatesIn);
 
     // Set OutPort buffer
     addOutPort("q", m_qOut);
@@ -338,6 +344,12 @@ RTC::ReturnCode_t ImpedanceController::onExecute(RTC::UniqueId ec_id)
         m_qRefIn.read();
         m_q.tm = m_qRef.tm;
     }
+    if (m_stHandRefWrenchIn.isNew()) {
+      m_stHandRefWrenchIn.read();
+    }
+    if (m_stHandContactStatesIn.isNew()) {
+      m_stHandContactStatesIn.read();
+    }
     if ( m_qRef.data.length() ==  m_robot->numJoints() &&
          m_qCurrent.data.length() ==  m_robot->numJoints() ) {
 
@@ -515,6 +527,10 @@ void ImpedanceController::getTargetParameters ()
 
 void ImpedanceController::calcForceMoment ()
 {
+  bool st_hand_state = false;
+  for (size_t i = 0; i < m_stHandContactStates.data.length(); i++) {
+    if (m_stHandContactStates.data[i]) st_hand_state = true;
+  }
       for (unsigned int i=0; i<m_forceIn.size(); i++){
         if ( m_force[i].data.length()==6 ) {
           std::string sensor_name = m_forceIn[i]->name();
@@ -523,6 +539,25 @@ void ImpedanceController::calcForceMoment ()
           hrp::Vector3 data_r(m_force[i].data[3], m_force[i].data[4], m_force[i].data[5]);
           hrp::Vector3 ref_data_p(m_ref_force[i].data[0], m_ref_force[i].data[1], m_ref_force[i].data[2]);
           hrp::Vector3 ref_data_r(m_ref_force[i].data[3], m_ref_force[i].data[4], m_ref_force[i].data[5]);
+          if (st_hand_state) {
+            int arm_side;
+            if (sensor_name == "rhsensor") arm_side = 0;
+            if (sensor_name == "lhsensor") arm_side = 1;
+            for (size_t j = 0; j < 3; j++) {
+              ref_data_p(j) = m_stHandRefWrench.data[6 * arm_side + j];
+              ref_data_r(j) = m_stHandRefWrench.data[6 * arm_side + j + 3];
+            }
+            if ((ref_data_p - pre_ref_hand_force[arm_side]).norm() > 5.0) {
+              ref_data_p = pre_ref_hand_force[arm_side] + 5.0 * (ref_data_p - pre_ref_hand_force[arm_side]).normalized();
+            }
+            if ((ref_data_r - pre_ref_hand_moment[arm_side]).norm() > 5.0) {
+              ref_data_r = pre_ref_hand_moment[arm_side] + 5.0 * (ref_data_r - pre_ref_hand_moment[arm_side]).normalized();
+            }
+            for (size_t j = 0; j < 3; j++) {
+              pre_ref_hand_force[arm_side](j) = ref_data_p(j);
+              pre_ref_hand_moment[arm_side](j) = ref_data_r(j);
+            }
+          }
           if ( DEBUGP ) {
             std::cerr << "[" << m_profile.instance_name << "] force and moment [" << sensor_name << "]" << std::endl;
             std::cerr << "[" << m_profile.instance_name << "]   sensor force  = " << data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;

@@ -189,6 +189,10 @@ class Stabilizer
   RTC::TimedDoubleSeq m_allRefWrench;
   RTC::TimedDoubleSeq m_allEEComp;
   RTC::TimedDoubleSeq m_debugData;
+
+  RTC::TimedDoubleSeq m_icRefWrench;
+  RTC::TimedBooleanSeq m_icHandContactStates;
+  RTC::TimedDoubleSeq m_allLocalRefWrench;
   
   // DataInPort declaration
   // <rtc-template block="inport_declare">
@@ -225,6 +229,8 @@ class Stabilizer
   RTC::OutPort<RTC::TimedBooleanSeq> m_actContactStatesOut;
   RTC::OutPort<RTC::TimedDoubleSeq> m_COPInfoOut;
   RTC::OutPort<RTC::TimedLong> m_emergencySignalOut;
+  RTC::OutPort<RTC::TimedDoubleSeq> m_icRefWrenchOut;
+  RTC::OutPort<RTC::TimedBooleanSeq> m_icHandContactStatesOut;
   // for debug output
   RTC::OutPort<RTC::TimedPoint3D> m_originRefZmpOut, m_originRefCogOut, m_originRefCogVelOut, m_originNewZmpOut;
   RTC::OutPort<RTC::TimedPoint3D> m_originActZmpOut, m_originActCogOut, m_originActCogVelOut;
@@ -234,6 +240,7 @@ class Stabilizer
   RTC::OutPort<RTC::TimedDoubleSeq> m_allRefWrenchOut;
   RTC::OutPort<RTC::TimedDoubleSeq> m_allEECompOut;
   RTC::OutPort<RTC::TimedDoubleSeq> m_debugDataOut;
+  RTC::OutPort<RTC::TimedDoubleSeq> m_allLocalRefWrenchOut;
   
   // </rtc-template>
 
@@ -268,7 +275,7 @@ class Stabilizer
     hrp::Vector3 d_foot_pos, d_foot_rpy, ee_d_foot_rpy;
     hrp::Vector3 eefm_pos_damping_gain, eefm_pos_time_const_support, eefm_rot_damping_gain, eefm_rot_time_const, eefm_swing_rot_spring_gain, eefm_swing_pos_spring_gain, eefm_swing_rot_time_const, eefm_swing_pos_time_const, eefm_ee_moment_limit;
     double eefm_pos_compensation_limit, eefm_rot_compensation_limit;
-    hrp::Vector3 ref_force, ref_moment;
+    hrp::Vector3 ref_force, ref_moment, local_ref_force, local_ref_moment;
     hrp::dvector6 eefm_ee_forcemoment_distribution_weight;
     double swing_support_gain, support_time;
     // For swing ee modification
@@ -296,7 +303,7 @@ class Stabilizer
   int m_is_falling_counter;
   std::vector<int> m_will_fall_counter;
   int is_air_counter, detection_count_to_air;
-  bool is_legged_robot, on_ground, is_emergency, is_seq_interpolating, reset_emergency_flag, eefm_use_force_difference_control, eefm_use_swing_damping, initial_cp_too_large_error, use_limb_stretch_avoidance, use_zmp_truncation, hand_impedance_control;
+  bool is_legged_robot, on_ground, is_emergency, is_seq_interpolating, reset_emergency_flag, eefm_use_force_difference_control, eefm_use_swing_damping, initial_cp_too_large_error, use_limb_stretch_avoidance, use_zmp_truncation;
   bool is_walking, is_estop_while_walking;
   hrp::Vector3 current_root_p, target_root_p;
   hrp::Matrix33 current_root_R, target_root_R, prev_act_foot_origin_rot, prev_ref_foot_origin_rot, target_foot_origin_rot, ref_foot_origin_rot;
