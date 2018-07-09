@@ -57,7 +57,7 @@ public:
 class SimpleZMPDistributor
 {
     FootSupportPolygon fs, fs_mgn;
-    std::vector<LimbContactConstraintBase*> foot_contact_constraint_list;
+    std::vector<LimbContactConstraint> foot_contact_constraint_list;
     std::vector<double> weight_param_for_qp_weight_matrix;
     double leg_inside_margin, leg_outside_margin, leg_front_margin, leg_rear_margin, wrench_alpha_blending;
     boost::shared_ptr<FirstOrderLowPassFilter<double> > alpha_filter;
@@ -68,19 +68,20 @@ public:
     SimpleZMPDistributor (const double _dt) : wrench_alpha_blending (0.5)
     {
         alpha_filter = boost::shared_ptr<FirstOrderLowPassFilter<double> >(new FirstOrderLowPassFilter<double>(1e7, _dt, 0.5)); // [Hz], Almost no filter by default
-        foot_contact_constraint_list.push_back(new SimpleLimbContactConstraint(std::string("rleg")));
-        foot_contact_constraint_list.push_back(new SimpleLimbContactConstraint(std::string("lleg")));
-        foot_contact_constraint_list.push_back(new RopeGraspHandContactConstraint(std::string("rarm")));
-        foot_contact_constraint_list.push_back(new RopeGraspHandContactConstraint(std::string("larm")));
+        foot_contact_constraint_list.push_back(LimbContactConstraint(std::string("rleg")));
+        foot_contact_constraint_list.push_back(LimbContactConstraint(std::string("lleg")));
+        foot_contact_constraint_list.push_back(LimbContactConstraint(std::string("rarm")));
+        foot_contact_constraint_list.push_back(LimbContactConstraint(std::string("larm")));
+        foot_contact_constraint_list[0].set_constraint_type(SURFACE);
+        foot_contact_constraint_list[1].set_constraint_type(SURFACE);
+        foot_contact_constraint_list[2].set_constraint_type(ROPE);
+        foot_contact_constraint_list[3].set_constraint_type(ROPE);
         for (size_t i = 0; i < 6; i++) { weight_param_for_qp_weight_matrix.push_back(100.0); }
         weight_param_for_qp_weight_matrix.push_back(0.01);
 
     };
     ~SimpleZMPDistributor ()
     {
-      for (size_t i = 0; i < foot_contact_constraint_list.size(); i++) {
-        delete foot_contact_constraint_list[i];
-      }
     }
 
     inline bool is_inside_foot (const hrp::Vector3& leg_pos, const bool is_lleg, const double margin = 0.0)
@@ -203,7 +204,7 @@ public:
     {
         fs.set_vertices(vs);
         for (size_t i = 0; i < vs.size(); i++) {
-          foot_contact_constraint_list[i]->set_foot_vertices(vs[i]);
+          foot_contact_constraint_list[i].set_foot_vertices(vs[i]);
         }
         // leg_inside_margin = fs.get_foot_vertex(0, 0)(1);
         // leg_front_margin = fs.get_foot_vertex(0, 0)(0);
@@ -279,7 +280,7 @@ public:
         return;
       }
       for (size_t i = 0; i < sfcs.size(); i++) {
-        foot_contact_constraint_list[i]->set_static_friction_coefficients(sfcs[i]);
+        foot_contact_constraint_list[i].set_static_friction_coefficients(sfcs[i]);
       }
     };
     void set_weight_param_for_qp(std::vector<double>& weight_param_vector)
@@ -299,7 +300,7 @@ public:
     {
       for (size_t i = 0; i < foot_contact_constraint_list.size(); i++) {
         Eigen::Vector2d sfc;
-        foot_contact_constraint_list[i]->get_static_friction_coefficients(sfc);
+        foot_contact_constraint_list[i].get_static_friction_coefficients(sfc);
         sfcs.push_back(sfc);
       }
     }
@@ -876,7 +877,7 @@ public:
       size_t state_dim = 0;
       for (size_t i = 0; i < ee_num; i++) {
         if (is_contact_list[i] && is_feedback_control_enable[i]) {
-          state_dim += foot_contact_constraint_list[i]->get_state_dim();
+          state_dim += foot_contact_constraint_list[i].get_state_dim();
         }
       }
 
@@ -889,10 +890,11 @@ public:
       for (size_t i = 0; i < ee_num; i++) {
         if (is_contact_list[i] && is_feedback_control_enable[i]) {
           if ((ee_name[i] == "rleg") || (ee_name[i] == "lleg")) {
-            foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], ee_rot[i]);
-            foot_contact_constraint_list[i]->calcZMPMatrix(ee_pos[i], ee_rot[i], new_refzmp);
+            foot_contact_constraint_list[i].calcSurfaceContactMatrix(ee_pos[i], ee_rot[i]);
+            foot_contact_constraint_list[i].calcSurfaceZMPMatrix(ee_pos[i], ee_rot[i], new_refzmp);
           } else if ((ee_name[i] == "rarm") || (ee_name[i] == "larm")) {
-            foot_contact_constraint_list[i]->calcContactMatrix(ee_pos[i], act_forces[i].normalized());
+            foot_contact_constraint_list[i].calcRopeContactMatrix(ee_pos[i], act_forces[i].normalized());
+            foot_contact_constraint_list[i].calcRopeZMPMatrix();
           }
         }
       }
@@ -902,7 +904,7 @@ public:
         for (size_t i = 0; i < ee_name.size(); i++) {
           if (is_contact_list[i] && is_feedback_control_enable[i]) {
             hrp::dmatrix contact_mat;
-            foot_contact_constraint_list[i]->get_contact_matrix(contact_mat);
+            foot_contact_constraint_list[i].get_contact_matrix(contact_mat);
             Phimat.block(0, col_idx, wrench_dim, contact_mat.cols()) = contact_mat;
             col_idx += contact_mat.cols();
           }
@@ -912,7 +914,7 @@ public:
           for (size_t i = 0; i < ee_name.size(); i++) {
             if (is_contact_list[i] && is_feedback_control_enable[i]) {
               hrp::dmatrix zmp_mat;
-              foot_contact_constraint_list[i]->get_zmp_matrix(zmp_mat);
+              foot_contact_constraint_list[i].get_zmp_matrix(zmp_mat);
               Phimat.block(wrench_dim, col_idx, zmp_dim, zmp_mat.cols()) = zmp_mat;
               col_idx += zmp_mat.cols();
             }
@@ -940,14 +942,14 @@ public:
       size_t temp_count = 0;
       for (size_t i = 0; i < ee_num; i++) {
         if (is_contact_list[i] && is_feedback_control_enable[i]) {
-          size_t state_dim_one = foot_contact_constraint_list[i]->get_state_dim();
+          size_t state_dim_one = foot_contact_constraint_list[i].get_state_dim();
           hrp::dvector temp_state(state_dim_one);
           for (size_t j = 0; j < state_dim_one; j++) {
             temp_state(j) = rho_vec(temp_count);
             temp_count++;
           }
           hrp::dmatrix contact_mat;
-          foot_contact_constraint_list[i]->get_contact_matrix(contact_mat);
+          foot_contact_constraint_list[i].get_contact_matrix(contact_mat);
           tmpv = contact_mat * temp_state;
           ref_limb_force[i] = hrp::Vector3(tmpv(0), tmpv(1), tmpv(2));
           ref_limb_moment[i] = hrp::Vector3(tmpv(3), tmpv(4), tmpv(5)) - ee_pos[i].cross(ref_limb_force[i]);

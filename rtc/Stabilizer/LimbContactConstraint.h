@@ -1,46 +1,18 @@
+#ifndef LIMBCONTACTCONSTRAINT_H
+#define LIMBCONTACTCONSTRAINT_H
 #define CONE_DIM 4
 
-enum LimbType {
-  RLEG,
-  LLEG,
-  RARM,
-  LARM
+enum ConstraintType {
+  SURFACE,
+  ROPE
 };
 
-class LimbContactConstraintBase
+class LimbContactConstraint
 {
-protected:
+public:
   hrp::dmatrix ee_contact_matrix;
   hrp::dmatrix ee_zmp_matrix;
   std::string limb_name;
-public:
-  LimbContactConstraintBase (): limb_name("") {}
-  LimbContactConstraintBase (const std::string& _limb_name) { limb_name = _limb_name; }
-  ~LimbContactConstraintBase () {}
-
-  //setter
-  virtual void set_limb_name (const std::string& _limb_name) { limb_name = _limb_name; };
-  virtual void set_foot_vertices (const std::vector<Eigen::Vector2d>& fvs) { std::cerr << "set support polygon vertices" << std::endl; };
-  virtual void set_static_friction_coefficients (const Eigen::Vector2d& sfc) {};
-  //getter
-  virtual void get_limb_name (std::string& _limb_name ) { _limb_name = limb_name; };
-  virtual void get_contact_matrix (hrp::dmatrix& mat) { mat = ee_contact_matrix; };
-  virtual void get_zmp_matrix (hrp::dmatrix& mat) { mat = ee_zmp_matrix; };
-  virtual int get_state_dim (void) { return 0; };
-  virtual void get_static_friction_coefficients(Eigen::Vector2d& sfc) {};
-  //print
-  virtual void print_info(void) {};
-
-  virtual void calcContactMatrix(void) { std::cerr << "Implement ContactMatrix method" << std::endl; };
-  virtual void calcContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot) {};
-  virtual void calcContactMatrix (const hrp::Vector3& ee_pos, const hrp::Vector3& rope_dir) {};
-  virtual void calcZMPMatrix(void) { std::cerr << "Implement ZMPMatrix method" << std::endl; };
-  virtual void calcZMPMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const hrp::Vector3& ref_zmp) {};
-};
-
-class SimpleLimbContactConstraint: public LimbContactConstraintBase
-{
-protected:
   //shape info
   std::vector<Eigen::Vector2d> local_foot_vertices;
   std::vector<hrp::Vector3> world_foot_vertices;
@@ -48,16 +20,23 @@ protected:
   //friction info
   Eigen::Vector2d static_friction_coefficients;
   hrp::dmatrix friction_cone_matrix;
-public:
-  SimpleLimbContactConstraint (const std::string& _limb_name) : LimbContactConstraintBase(_limb_name), vertices_num(4)
+
+  ConstraintType constraint_type;
+
+  LimbContactConstraint (): limb_name("") {}
+  LimbContactConstraint (const std::string& _limb_name)
   {
+    limb_name = _limb_name;
     Eigen::Vector2d sfc;
     sfc(0) = 0.5;
     sfc(1) = 0.5;
     set_static_friction_coefficients(sfc);
   }
-  ~SimpleLimbContactConstraint () {}
+  ~LimbContactConstraint () {}
+
   //setter
+  void set_limb_name (const std::string& _limb_name) { limb_name = _limb_name; };
+  void set_constraint_type (ConstraintType _type) { constraint_type = _type; };
   void set_static_friction_coefficients (const Eigen::Vector2d& sfc)
   {
     static_friction_coefficients = sfc;
@@ -73,24 +52,31 @@ public:
     }
   };
   //getter
-  virtual void get_static_friction_coefficients (Eigen::Vector2d& sfc) { sfc = static_friction_coefficients; };
+  void get_limb_name (std::string& _limb_name ) { _limb_name = limb_name; };
+  void get_contact_matrix (hrp::dmatrix& mat) { mat = ee_contact_matrix; };
+  void get_zmp_matrix (hrp::dmatrix& mat) { mat = ee_zmp_matrix; };
   int get_cone_dim(void) { return CONE_DIM; };
   int get_vertices_num(void) { return vertices_num; };
-  virtual int get_state_dim (void) { return CONE_DIM * vertices_num; };
-  //print
-  virtual void print_info (void)
+  int get_state_dim (void)
   {
-    std::cerr << limb_name << " world vertices" << std::endl;
-    for (size_t i = 0; i < world_foot_vertices.size(); i++) {
-      for (size_t j = 0; j < 3; j++) {
-        std::cerr << world_foot_vertices[i](j) << " ";
-      }
-      std::cerr << std::endl;
+    int state_dim = 0;
+    switch (constraint_type) {
+      case SURFACE:
+        state_dim = CONE_DIM * vertices_num;
+        break;
+      case ROPE:
+        state_dim = 1;
+        break;
+      default:
+        break;
     }
-    std::cerr << std::endl;
-  }
-  
-  //calc friction cone matrix
+    return state_dim;
+  };
+  void get_static_friction_coefficients (Eigen::Vector2d& sfc)
+  {
+    sfc = static_friction_coefficients;
+  };
+
   void calcFrictionConeMatrix(void)
   {
     friction_cone_matrix = hrp::dmatrix::Zero(3, CONE_DIM);
@@ -122,7 +108,7 @@ public:
     ret_mat.block(3, 0, 3, CONE_DIM) = vertex_cross_product * world_cone_matrix;
   }
 
-  virtual void calcContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot)
+  void calcSurfaceContactMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot)
   {
     ee_contact_matrix = hrp::dmatrix::Zero(6, vertices_num * CONE_DIM);
     for (size_t i = 0; i < vertices_num; i++) {
@@ -132,7 +118,7 @@ public:
     }
   }
 
-  virtual void calcZMPMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const hrp::Vector3& ref_zmp)
+  void calcSurfaceZMPMatrix (const hrp::Vector3& ee_pos, const hrp::Matrix33& ee_rot, const hrp::Vector3& ref_zmp)
   {
     ee_zmp_matrix = hrp::dmatrix::Zero(3, vertices_num * CONE_DIM);
     for (size_t i = 0; i < vertices_num; i++) {
@@ -145,15 +131,8 @@ public:
       ee_zmp_matrix.block(0, i * CONE_DIM, 3, CONE_DIM) = vertex_cross_product * ee_rot * friction_cone_matrix;
     }
   }
-};
 
-class RopeGraspHandContactConstraint: public LimbContactConstraintBase
-{
-public:
-  RopeGraspHandContactConstraint (const std::string& _limb_name) : LimbContactConstraintBase(_limb_name) {}
-  ~RopeGraspHandContactConstraint () {}
-  virtual int get_state_dim (void) { return 1; };
-  virtual void calcContactMatrix (const hrp::Vector3& ee_pos, const hrp::Vector3& rope_dir)
+  void calcRopeContactMatrix (const hrp::Vector3& ee_pos, const hrp::Vector3& rope_dir)
   {
     ee_contact_matrix = hrp::dmatrix::Zero(6, 1);
     for (size_t i = 0; i < 3; i++) ee_contact_matrix(i, 0) = rope_dir(i);
@@ -164,8 +143,9 @@ public:
     ee_contact_matrix.block(3, 0, 3, 1) = vertex_cross_product * rope_dir;
   }
 
-  virtual void calcZMPMatrix (void)
+  void calcRopeZMPMatrix (void)
   {
     ee_zmp_matrix = hrp::dmatrix::Zero(3, 1);
   }
 };
+#endif
