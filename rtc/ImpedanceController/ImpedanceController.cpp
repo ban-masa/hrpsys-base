@@ -539,7 +539,7 @@ void ImpedanceController::calcForceMoment ()
           hrp::Vector3 data_r(m_force[i].data[3], m_force[i].data[4], m_force[i].data[5]);
           hrp::Vector3 ref_data_p(m_ref_force[i].data[0], m_ref_force[i].data[1], m_ref_force[i].data[2]);
           hrp::Vector3 ref_data_r(m_ref_force[i].data[3], m_ref_force[i].data[4], m_ref_force[i].data[5]);
-          if (st_hand_state) {
+          if (st_hand_state && ((sensor_name == "rhsensor") || (sensor_name == "lhsensor"))) {
             int arm_side;
             if (sensor_name == "rhsensor") arm_side = 0;
             if (sensor_name == "lhsensor") arm_side = 1;
