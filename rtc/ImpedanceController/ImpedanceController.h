@@ -125,6 +125,8 @@ class ImpedanceController
   InPort<TimedDoubleSeq> m_stHandRefWrenchIn;
   TimedBooleanSeq m_stHandContactStates;
   InPort<TimedBooleanSeq> m_stHandContactStatesIn;
+  TimedDoubleSeq m_icHandRefWrench;
+  OutPort<TimedDoubleSeq> m_icHandRefWrenchOut;
   
   // </rtc-template>
 

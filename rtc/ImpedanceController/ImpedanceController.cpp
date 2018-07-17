@@ -51,6 +51,7 @@ ImpedanceController::ImpedanceController(RTC::Manager* manager)
       m_rpyIn("rpy", m_rpy),
       m_stHandRefWrenchIn("stHandRefWrench", m_stHandRefWrench),
       m_stHandContactStatesIn("stHandContactStates", m_stHandContactStates),
+      m_icHandRefWrenchOut("icHandRefWrench", m_icHandRefWrench),
       m_qOut("q", m_q),
       m_ImpedanceControllerServicePort("ImpedanceControllerService"),
       // </rtc-template>
@@ -87,6 +88,7 @@ RTC::ReturnCode_t ImpedanceController::onInitialize()
 
     // Set OutPort buffer
     addOutPort("q", m_qOut);
+    addOutPort("icHandRefWrench", m_icHandRefWrenchOut);
   
     // Set service provider to Ports
     m_ImpedanceControllerServicePort.registerProvider("service0", "ImpedanceControllerService", m_service0);
@@ -269,6 +271,7 @@ RTC::ReturnCode_t ImpedanceController::onInitialize()
     m_q.data.length(dof);
     qrefv.resize(dof);
     loop = 0;
+    m_icHandRefWrench.data.length(2 * 6);
 
     return RTC::RTC_OK;
 }
@@ -418,6 +421,19 @@ RTC::ReturnCode_t ImpedanceController::onExecute(RTC::UniqueId ec_id)
                 std::cerr << std::endl;
             }
         }
+        //Output RefWrench to Logger
+        {
+          for (int i = 0; i < 3; i++) {
+            m_icHandRefWrench.data[i] = abs_ref_forces["rhsensor"](i);
+            m_icHandRefWrench.data[i + 3] = abs_ref_moments["rhsensor"](i);
+            m_icHandRefWrench.data[6 + i] = abs_ref_forces["lhsensor"](i);
+            m_icHandRefWrench.data[6 + i + 3] = abs_ref_moments["lhsensor"](i);
+          }
+          m_icHandRefWrench.tm = m_qRef.tm;
+          m_icHandRefWrenchOut.write();
+        }
+
+
     } else {
         if ( DEBUGP || loop % 100 == 0 ) {
             std::cerr << "ImpedanceController is not working..." << std::endl;

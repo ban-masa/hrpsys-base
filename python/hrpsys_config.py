@@ -884,6 +884,7 @@ class HrpsysConfigurator(object):
             self.connectLoggerPort(self.sh, 'zmpOut')
         if self.ic != None:
             self.connectLoggerPort(self.ic, 'q')
+            self.connectLoggerPort(self.ic, 'icHandRefWrench')
         if self.abc != None:
             self.connectLoggerPort(self.abc, 'zmpOut')
             self.connectLoggerPort(self.abc, 'baseTformOut')
