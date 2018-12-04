@@ -96,6 +96,7 @@ Stabilizer::Stabilizer(RTC::Manager* manager)
     m_currentBasePosOut("currentBasePos", m_currentBasePos),
     m_currentBaseRpyOut("currentBaseRpy", m_currentBaseRpy),
     m_allRefWrenchOut("allRefWrench", m_allRefWrench),
+    m_allActWrenchOut("allActWrench", m_allActWrench),
     m_allEECompOut("allEEComp", m_allEEComp),
     m_debugDataOut("debugData", m_debugData),
     control_mode(MODE_IDLE),
@@ -160,6 +161,7 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   addOutPort("currentBasePos", m_currentBasePosOut);
   addOutPort("currentBaseRpy", m_currentBaseRpyOut);
   addOutPort("allRefWrench", m_allRefWrenchOut);
+  addOutPort("allActWrench", m_allActWrenchOut);
   addOutPort("allEEComp", m_allEECompOut);
   addOutPort("debugData", m_debugDataOut);
   
@@ -309,6 +311,7 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
       act_ee_R.push_back(hrp::Matrix33::Identity());
       projected_normal.push_back(hrp::Vector3::Zero());
       act_force.push_back(hrp::Vector3::Zero());
+      act_moment.push_back(hrp::Vector3::Zero());
       ref_force.push_back(hrp::Vector3::Zero());
       ref_moment.push_back(hrp::Vector3::Zero());
       contact_states_index_map.insert(std::pair<std::string, size_t>(ee_name, i));
@@ -479,6 +482,7 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
   m_originActCog.data.x = m_originActCog.data.y = m_originActCog.data.z = 0.0;
   m_originActCogVel.data.x = m_originActCogVel.data.y = m_originActCogVel.data.z = 0.0;
   m_allRefWrench.data.length(stikp.size() * 6); // 6 is wrench dim
+  m_allActWrench.data.length(stikp.size() * 6); // 6 is wrench dim
   m_allEEComp.data.length(stikp.size() * 6); // 6 is pos+rot dim
   m_debugData.data.length(1); m_debugData.data[0] = 0.0;
 
@@ -715,12 +719,16 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
           for (size_t j = 0; j < 3; j++) {
               m_allRefWrench.data[6*i+j] = stikp[i].ref_force(j);
               m_allRefWrench.data[6*i+j+3] = stikp[i].ref_moment(j);
+              m_allActWrench.data[6*i+j] = act_force[i](j);
+              m_allActWrench.data[6*i+j+3] = act_moment[i](j);
               m_allEEComp.data[6*i+j] = stikp[i].d_foot_pos(j);
               m_allEEComp.data[6*i+j+3] = stikp[i].d_foot_rpy(j);
           }
       }
       m_allRefWrench.tm = m_qRef.tm;
+      m_allActWrench.tm = m_qRef.tm;
       m_allRefWrenchOut.write();
+      m_allActWrenchOut.write();
       m_allEEComp.tm = m_qRef.tm;
       m_allEECompOut.write();
       m_actBaseRpy.data.r = act_base_rpy(0);
@@ -752,7 +760,6 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
       m_emergencySignalOut.write();
     }
   }
-
   return RTC::RTC_OK;
 }
 
@@ -1018,6 +1025,7 @@ void Stabilizer::getActualParameters ()
         ikp.ref_moment = foot_origin_rot.transpose() * ikp.ref_moment;
         ikp.ref_force = foot_origin_rot.transpose() * ikp.ref_force;
         sensor_force = foot_origin_rot.transpose() * sensor_force;
+        sensor_moment = foot_origin_rot.transpose() * sensor_moment;
         ee_moment = foot_origin_rot.transpose() * ee_moment;
         if ( i == 0 ) f_diff += -1*sensor_force;
         else f_diff += sensor_force;
@@ -1056,6 +1064,7 @@ void Stabilizer::getActualParameters ()
             /* projected_normal = c1 * plane_x + c2 * plane_y : c1 = plane_x.dot(normal_vector), c2 = plane_y.dot(normal_vector) because (normal-vector - projected_normal) is orthogonal to plane */
             projected_normal.at(i) = plane_x.dot(normal_vector) * plane_x + plane_y.dot(normal_vector) * plane_y;
             act_force.at(i) = sensor_force;
+            act_moment.at(i) = sensor_moment;
         }
         //act_total_foot_origin_moment += (target->R * ikp.localCOPPos + target->p).cross(sensor_force) + ee_moment;
         act_total_foot_origin_moment += (target->R * ikp.localp + target->p - foot_origin_pos).cross(sensor_force) + ee_moment;

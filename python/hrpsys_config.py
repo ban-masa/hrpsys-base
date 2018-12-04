@@ -899,6 +899,7 @@ class HrpsysConfigurator(object):
             self.connectLoggerPort(self.st, 'originActCog')
             self.connectLoggerPort(self.st, 'originActCogVel')
             self.connectLoggerPort(self.st, 'allRefWrench')
+            self.connectLoggerPort(self.st, 'allActWrench')
             self.connectLoggerPort(self.st, 'allEEComp')
             self.connectLoggerPort(self.st, 'q')
             self.connectLoggerPort(self.st, 'actBaseRpy')

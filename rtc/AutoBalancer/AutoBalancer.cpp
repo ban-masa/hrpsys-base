@@ -381,6 +381,8 @@ RTC::ReturnCode_t AutoBalancer::onInitialize()
 
     additional_force_applied_link = m_robot->rootLink();
     additional_force_applied_point_offset = hrp::Vector3::Zero();
+
+    foot_mid_rotation = hrp::Matrix33::Identity();
     return RTC::RTC_OK;
 }
 
@@ -1062,10 +1064,11 @@ void AutoBalancer::fixLegToCoords2 (coordinates& tmp_fix_coords)
     // This will be removed after seq outputs adequate waistRPY discussed in https://github.com/fkanehiro/hrpsys-base/issues/272
     // Snap input tmp_fix_coords to XY plan projection.
     {
-      hrp::Vector3 ex = hrp::Vector3::UnitX();
-      hrp::Vector3 ez = hrp::Vector3::UnitZ();
-      hrp::Vector3 xv1 (tmp_fix_coords.rot * ex);
-      xv1(2) = 0.0;
+      hrp::Vector3 ex = foot_mid_rotation * hrp::Vector3::UnitX();
+      hrp::Vector3 ey = foot_mid_rotation * hrp::Vector3::UnitY();
+      hrp::Vector3 ez = foot_mid_rotation * hrp::Vector3::UnitZ();
+      hrp::Vector3 xv1(tmp_fix_coords.rot * hrp::Vector3::UnitX());
+      xv1 = xv1.dot(ex) * ex + xv1.dot(ey) * ey;
       xv1.normalize();
       hrp::Vector3 yv1(ez.cross(xv1));
       tmp_fix_coords.rot(0,0) = xv1(0); tmp_fix_coords.rot(1,0) = xv1(1); tmp_fix_coords.rot(2,0) = xv1(2);
@@ -1690,6 +1693,10 @@ bool AutoBalancer::setAutoBalancerParam(const OpenHRP::AutoBalancerService::Auto
                                                                           i_param.graspless_manip_reference_trans_rot[1],
                                                                           i_param.graspless_manip_reference_trans_rot[2],
                                                                           i_param.graspless_manip_reference_trans_rot[3]).normalized().toRotationMatrix()); // rtc: (x, y, z, w) but eigen: (w, x, y, z)
+  foot_mid_rotation = (Eigen::Quaternion<double>(i_param.foot_mid_rot_quaternion[0],
+                                                 i_param.foot_mid_rot_quaternion[1],
+                                                 i_param.foot_mid_rot_quaternion[2],
+                                                 i_param.foot_mid_rot_quaternion[3]).normalized().toRotationMatrix());
   transition_time = i_param.transition_time;
   std::vector<std::string> cur_leg_names, dst_leg_names;
   cur_leg_names = leg_names;
@@ -1822,11 +1829,20 @@ bool AutoBalancer::getAutoBalancerParam(OpenHRP::AutoBalancerService::AutoBalanc
       i_param.graspless_manip_p_gain[j] = graspless_manip_p_gain[j];
   for (size_t j = 0; j < 3; j++)
       i_param.graspless_manip_reference_trans_pos[j] = graspless_manip_reference_trans_coords.pos[j];
-  Eigen::Quaternion<double> qt(graspless_manip_reference_trans_coords.rot);
-  i_param.graspless_manip_reference_trans_rot[0] = qt.w();
-  i_param.graspless_manip_reference_trans_rot[1] = qt.x();
-  i_param.graspless_manip_reference_trans_rot[2] = qt.y();
-  i_param.graspless_manip_reference_trans_rot[3] = qt.z();
+  {
+      Eigen::Quaternion<double> qt(graspless_manip_reference_trans_coords.rot);
+      i_param.graspless_manip_reference_trans_rot[0] = qt.w();
+      i_param.graspless_manip_reference_trans_rot[1] = qt.x();
+      i_param.graspless_manip_reference_trans_rot[2] = qt.y();
+      i_param.graspless_manip_reference_trans_rot[3] = qt.z();
+  }
+  {
+      Eigen::Quaternion<double> qt(foot_mid_rotation);
+      i_param.foot_mid_rot_quaternion[0] = qt.w();
+      i_param.foot_mid_rot_quaternion[1] = qt.x();
+      i_param.foot_mid_rot_quaternion[2] = qt.y();
+      i_param.foot_mid_rot_quaternion[3] = qt.z();
+  }
   i_param.transition_time = transition_time;
   i_param.zmp_transition_time = zmp_transition_time;
   i_param.adjust_footstep_transition_time = adjust_footstep_transition_time;

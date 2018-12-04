@@ -285,6 +285,7 @@ class AutoBalancer
   std::string graspless_manip_arm;
   hrp::Vector3 graspless_manip_p_gain;
   rats::coordinates graspless_manip_reference_trans_coords;
+  hrp::Matrix33 foot_mid_rotation;
 
   hrp::InvDynStateBuffer idsb;
   std::vector<IIRFilter> invdyn_zmp_filters;

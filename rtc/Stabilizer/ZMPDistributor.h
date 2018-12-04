@@ -128,9 +128,11 @@ public:
     void calc_convex_hull (const std::vector<std::vector<Eigen::Vector2d> >& vs, const std::vector<bool>& cs, const std::vector<hrp::Vector3>& ee_pos, const std::vector <hrp::Matrix33>& ee_rot)
     {
       // transform coordinate
+
       std::vector<Eigen::Vector2d>  tvs;
       hrp::Vector3 tpos;
       tvs.reserve(cs.size()*vs[0].size());
+      //for (size_t i = 0; i < std::min(cs.size(), vs.size()); i++) {
       for (size_t i = 0; i < cs.size(); i++) {
         if (cs[i]) {
           for (size_t j = 0; j < vs[i].size(); j++) {
