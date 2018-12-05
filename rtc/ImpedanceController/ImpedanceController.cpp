@@ -264,6 +264,7 @@ RTC::ReturnCode_t ImpedanceController::onInitialize()
     qrefv.resize(dof);
     loop = 0;
 
+    foot_mid_rotation = hrp::Matrix33::Identity();
     return RTC::RTC_OK;
 }
 
@@ -486,10 +487,11 @@ void ImpedanceController::getTargetParameters ()
         hrp::Vector3 new_foot_mid_pos(current_foot_mid_pos);
         hrp::Matrix33 new_foot_mid_rot;
         {
-            hrp::Vector3 ex = hrp::Vector3::UnitX();
-            hrp::Vector3 ez = hrp::Vector3::UnitZ();
-            hrp::Vector3 xv1 (current_foot_mid_rot * ex);
-            xv1(2) = 0.0;
+            hrp::Vector3 ex = foot_mid_rotation * hrp::Vector3::UnitX();
+            hrp::Vector3 ey = foot_mid_rotation * hrp::Vector3::UnitY();
+            hrp::Vector3 ez = foot_mid_rotation * hrp::Vector3::UnitZ();
+            hrp::Vector3 xv1(current_foot_mid_rot * hrp::Vector3::UnitX());
+            xv1 = xv1.dot(ex) * ex + xv1.dot(ey) * ey;
             xv1.normalize();
             hrp::Vector3 yv1(ez.cross(xv1));
             new_foot_mid_rot(0,0) = xv1(0); new_foot_mid_rot(1,0) = xv1(1); new_foot_mid_rot(2,0) = xv1(2);
@@ -731,6 +733,11 @@ bool ImpedanceController::setImpedanceControllerParam(const std::string& i_name_
         m_impedance_param[name].manip->setOptionalWeightVector(ov);
         use_sh_base_pos_rpy = i_param_.use_sh_base_pos_rpy;
 
+        foot_mid_rotation = (Eigen::Quaternion<double>(i_param_.foot_mid_rot_quaternion[0],
+                                                       i_param_.foot_mid_rot_quaternion[1],
+                                                       i_param_.foot_mid_rot_quaternion[2],
+                                                       i_param_.foot_mid_rot_quaternion[3]).normalized().toRotationMatrix());
+
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]    M, D, K (pos) : " << m_impedance_param[name].M_p << " " << m_impedance_param[name].D_p << " " << m_impedance_param[name].K_p << std::endl;
@@ -791,10 +798,20 @@ bool ImpedanceController::getImpedanceControllerParam(const std::string& i_name_
         // if impedance param of i_name_ is not found, return default impedance parameter ;; default parameter is specified ImpedanceParam struct's default constructer
         copyImpedanceParam(i_param_, ImpedanceParam());
         i_param_.use_sh_base_pos_rpy = use_sh_base_pos_rpy;
+        Eigen::Quaternion<double> qt(foot_mid_rotation);
+        i_param_.foot_mid_rot_quaternion[0] = qt.w();
+        i_param_.foot_mid_rot_quaternion[1] = qt.x();
+        i_param_.foot_mid_rot_quaternion[2] = qt.y();
+        i_param_.foot_mid_rot_quaternion[3] = qt.z();
         return false;
     }
     copyImpedanceParam(i_param_, m_impedance_param[i_name_]);
     i_param_.use_sh_base_pos_rpy = use_sh_base_pos_rpy;
+    Eigen::Quaternion<double> qt(foot_mid_rotation);
+    i_param_.foot_mid_rot_quaternion[0] = qt.w();
+    i_param_.foot_mid_rot_quaternion[1] = qt.x();
+    i_param_.foot_mid_rot_quaternion[2] = qt.y();
+    i_param_.foot_mid_rot_quaternion[3] = qt.z();
     return true;
 }
 

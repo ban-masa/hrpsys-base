@@ -189,6 +189,7 @@ class ImpedanceController
   int dummy;
   int loop;
   bool use_sh_base_pos_rpy;
+  hrp::Matrix33 foot_mid_rotation;
 };
 
 

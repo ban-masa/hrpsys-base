@@ -9,6 +9,7 @@ module OpenHRP
   {
     typedef sequence<double, 3> DblSequence3;
     typedef double DblArray3[3];
+    typedef double DblArray4[4];
     typedef sequence<double> DblSequence;
     typedef sequence<string> StrSequence;
     typedef sequence<sequence<double, 3> > Dbl3Sequence;
@@ -57,6 +58,8 @@ module OpenHRP
       DblSequence ik_optional_weight_vector;
       /// Use StateHolder basePos and baseRpy?
       boolean use_sh_base_pos_rpy;
+      /// Rotation quaternion of foot mid coords.
+      DblArray4 foot_mid_rot_quaternion;
     };
 
     /**
