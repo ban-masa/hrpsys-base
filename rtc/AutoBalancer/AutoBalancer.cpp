@@ -1071,11 +1071,24 @@ void AutoBalancer::fixLegToCoords2 (coordinates& tmp_fix_coords)
       xv1 = xv1.dot(ex) * ex + xv1.dot(ey) * ey;
       xv1.normalize();
       hrp::Vector3 yv1(ez.cross(xv1));
+      coordinates tmp_foot_fix_coords;
+      for (int i = 0; i < 3; i++) tmp_foot_fix_coords.pos(i) = tmp_fix_coords.pos(i);
+      tmp_foot_fix_coords.rot(0,0) = xv1(0); tmp_foot_fix_coords.rot(1,0) = xv1(1); tmp_foot_fix_coords.rot(2,0) = xv1(2);
+      tmp_foot_fix_coords.rot(0,1) = yv1(0); tmp_foot_fix_coords.rot(1,1) = yv1(1); tmp_foot_fix_coords.rot(2,1) = yv1(2);
+      tmp_foot_fix_coords.rot(0,2) = ez(0); tmp_foot_fix_coords.rot(1,2) = ez(1); tmp_foot_fix_coords.rot(2,2) = ez(2);
+      fixLegToCoords(tmp_foot_fix_coords.pos, tmp_foot_fix_coords.rot);
+    }
+    {
+      hrp::Vector3 ex = hrp::Vector3::UnitX();
+      hrp::Vector3 ez = hrp::Vector3::UnitZ();
+      hrp::Vector3 xv1 (tmp_fix_coords.rot * ex);
+      xv1(2) = 0.0;
+      xv1.normalize();
+      hrp::Vector3 yv1(ez.cross(xv1));
       tmp_fix_coords.rot(0,0) = xv1(0); tmp_fix_coords.rot(1,0) = xv1(1); tmp_fix_coords.rot(2,0) = xv1(2);
       tmp_fix_coords.rot(0,1) = yv1(0); tmp_fix_coords.rot(1,1) = yv1(1); tmp_fix_coords.rot(2,1) = yv1(2);
       tmp_fix_coords.rot(0,2) = ez(0); tmp_fix_coords.rot(1,2) = ez(1); tmp_fix_coords.rot(2,2) = ez(2);
     }
-    fixLegToCoords(tmp_fix_coords.pos, tmp_fix_coords.rot);
 }
 
 void AutoBalancer::solveFullbodyIK ()
