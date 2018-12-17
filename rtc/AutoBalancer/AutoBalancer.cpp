@@ -973,8 +973,22 @@ void AutoBalancer::calculateOutputRefForces ()
             std::cerr << "[" << m_profile.instance_name << "] alpha:" << alpha << std::endl;
         }
         double mg = m_robot->totalMass() * gg->get_gravitational_acceleration();
+        for (size_t i = 0; i < m_force.size(); i++) {
+          for (size_t j = 0; j < 3; j++) {
+            m_force[i].data[j] = 0.0;
+          }
+        }
         m_force[0].data[2] = alpha * mg;
         m_force[1].data[2] = (1-alpha) * mg;
+        if (m_ref_force.size() == 4) {
+          hrp::Vector3 ref_total_hand_force = ref_forces[2] + ref_forces[3];
+          for (size_t i = 0; i < 3; i++) {
+            m_force[2].data[i] = ref_forces[2](i);
+            m_force[3].data[i] = ref_forces[3](i);
+            m_force[0].data[i] -= ref_total_hand_force(i) * alpha;
+            m_force[1].data[i] -= ref_total_hand_force(i) * (1.0 - alpha);
+          }
+        }
     }
     if ( use_force == MODE_REF_FORCE_WITH_FOOT || use_force == MODE_REF_FORCE_RFU_EXT_MOMENT ) { // TODO : use other use_force mode. This should be depends on Stabilizer distribution mode.
         distributeReferenceZMPToWrenches (ref_zmp);
