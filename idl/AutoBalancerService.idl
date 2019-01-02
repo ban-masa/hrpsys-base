@@ -333,6 +333,7 @@ module OpenHRP
       DblArray3 additional_force_applied_point_offset;
       /// Rotation quaternion of foot mid coords.
       DblArray4 foot_mid_rot_quaternion;
+      boolean general_zmp_mode;
     };
 
     /**

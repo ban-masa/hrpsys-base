@@ -374,6 +374,8 @@ RTC::ReturnCode_t AutoBalancer::onInitialize()
     is_stop_mode = false;
     is_hand_fix_mode = false;
 
+    general_zmp_mode = false;
+
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
     if (sen == NULL) {
         std::cerr << "[" << m_profile.instance_name << "] WARNING! This robot model has no GyroSensor named 'gyrometer'! " << std::endl;
@@ -527,7 +529,23 @@ RTC::ReturnCode_t AutoBalancer::onExecute(RTC::UniqueId ec_id)
 //        }
 //        updateInvDynStateBuffer(idsb);
 
-        rel_ref_zmp = m_robot->rootLink()->R.transpose() * (ref_zmp - m_robot->rootLink()->p);
+        if (general_zmp_mode) {
+          hrp::Vector3 total_f = hrp::Vector3::Zero();
+          hrp::Vector3 total_m = hrp::Vector3::Zero();
+          double zmp_height = ref_zmp(2);
+          std::vector<hrp::Vector3> tmp_ref_forces;
+          for (int i = 0; i < 4; i++) tmp_ref_forces.push_back(hrp::Vector3(m_force[i].data[0], m_force[i].data[1], m_force[i].data[2]));
+          for (int i = 0; i < 4; i++) total_f += tmp_ref_forces[i];
+          total_m += ref_zmp.cross(tmp_ref_forces[0] + tmp_ref_forces[1]);
+          total_m += ikp["rarm"].target_p0.cross(tmp_ref_forces[contact_states_index_map["rarm"]]) + ikp["larm"].target_p0.cross(tmp_ref_forces[contact_states_index_map["larm"]]);
+          hrp::Vector3 general_zmp;
+          general_zmp(0) = (-total_m(1) + zmp_height * total_f(0)) / total_f(2);
+          general_zmp(1) = (total_m(0) + zmp_height * total_f(1)) / total_f(2);
+          general_zmp(2) = zmp_height;
+          rel_ref_zmp = m_robot->rootLink()->R.transpose() * (general_zmp - m_robot->rootLink()->p);
+        } else {
+          rel_ref_zmp = m_robot->rootLink()->R.transpose() * (ref_zmp - m_robot->rootLink()->p);
+        }
       } else {
         rel_ref_zmp = input_zmp;
         fik->d_root_height = 0.0;
@@ -1712,6 +1730,7 @@ bool AutoBalancer::setAutoBalancerParam(const OpenHRP::AutoBalancerService::Auto
   }
   graspless_manip_mode = i_param.graspless_manip_mode;
   graspless_manip_arm = std::string(i_param.graspless_manip_arm);
+  general_zmp_mode = i_param.general_zmp_mode;
   for (size_t j = 0; j < 3; j++)
       graspless_manip_p_gain[j] = i_param.graspless_manip_p_gain[j];
   for (size_t j = 0; j < 3; j++)
@@ -1852,6 +1871,8 @@ bool AutoBalancer::getAutoBalancerParam(OpenHRP::AutoBalancerService::AutoBalanc
   }
   i_param.graspless_manip_mode = graspless_manip_mode;
   i_param.graspless_manip_arm = graspless_manip_arm.c_str();
+
+  i_param.general_zmp_mode = general_zmp_mode;
   for (size_t j = 0; j < 3; j++)
       i_param.graspless_manip_p_gain[j] = graspless_manip_p_gain[j];
   for (size_t j = 0; j < 3; j++)
