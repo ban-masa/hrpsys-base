@@ -287,6 +287,7 @@ class AutoBalancer
   rats::coordinates graspless_manip_reference_trans_coords;
   hrp::Matrix33 foot_mid_rotation;
   bool general_zmp_mode;
+  bool is_hands_grasping[2];
 
   hrp::InvDynStateBuffer idsb;
   std::vector<IIRFilter> invdyn_zmp_filters;

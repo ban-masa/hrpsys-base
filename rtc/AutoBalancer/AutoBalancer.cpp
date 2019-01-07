@@ -375,6 +375,7 @@ RTC::ReturnCode_t AutoBalancer::onInitialize()
     is_hand_fix_mode = false;
 
     general_zmp_mode = false;
+    for (int i = 0; i < 2; i++) is_hands_grasping[i] = false;
 
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
     if (sen == NULL) {
@@ -807,7 +808,13 @@ void AutoBalancer::getOutputParametersForWalking ()
             it->second.target_p0 = it->second.target_link->p + it->second.target_link->R * it->second.localPos;
             it->second.target_r0 = it->second.target_link->R * it->second.localR;
             // contactStates is OFF other than leg_names
-            m_contactStates.data[idx] = false;
+            if (it->first == "rarm") {
+              m_contactStates.data[idx] = is_hands_grasping[0];
+            } else if (it->first == "larm") {
+              m_contactStates.data[idx] = is_hands_grasping[1];
+            } else {
+              m_contactStates.data[idx] = false;
+            }
             // controlSwingSupportTime is not used while double support period, 1.0 is neglected
             m_controlSwingSupportTime.data[idx] = 1.0;
             // Set limbCOPOffset
@@ -837,7 +844,13 @@ void AutoBalancer::getOutputParametersForABC ()
         if (dst != leg_names.end()) {
             m_contactStates.data[idx] = true;
         } else {
-            m_contactStates.data[idx] = false;
+            if (it->first == "rarm") {
+              m_contactStates.data[idx] = is_hands_grasping[0];
+            } else if (it->first == "larm") {
+              m_contactStates.data[idx] = is_hands_grasping[1];
+            } else {
+              m_contactStates.data[idx] = false;
+            }
         }
         // controlSwingSupportTime is not used while double support period, 1.0 is neglected
         m_controlSwingSupportTime.data[idx] = 1.0;
@@ -1731,6 +1744,8 @@ bool AutoBalancer::setAutoBalancerParam(const OpenHRP::AutoBalancerService::Auto
   graspless_manip_mode = i_param.graspless_manip_mode;
   graspless_manip_arm = std::string(i_param.graspless_manip_arm);
   general_zmp_mode = i_param.general_zmp_mode;
+  for (size_t j = 0; j < 2; j++)
+      is_hands_grasping[j] = i_param.is_hands_grasping[j];
   for (size_t j = 0; j < 3; j++)
       graspless_manip_p_gain[j] = i_param.graspless_manip_p_gain[j];
   for (size_t j = 0; j < 3; j++)
@@ -1873,6 +1888,8 @@ bool AutoBalancer::getAutoBalancerParam(OpenHRP::AutoBalancerService::AutoBalanc
   i_param.graspless_manip_arm = graspless_manip_arm.c_str();
 
   i_param.general_zmp_mode = general_zmp_mode;
+  for (size_t j = 0; j < 2; j++) 
+      i_param.is_hands_grasping[j] = is_hands_grasping[j];
   for (size_t j = 0; j < 3; j++)
       i_param.graspless_manip_p_gain[j] = graspless_manip_p_gain[j];
   for (size_t j = 0; j < 3; j++)
