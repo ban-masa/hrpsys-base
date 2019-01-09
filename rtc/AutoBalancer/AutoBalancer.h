@@ -288,6 +288,7 @@ class AutoBalancer
   hrp::Matrix33 foot_mid_rotation;
   bool general_zmp_mode;
   bool is_hands_grasping[2];
+  hrp::Vector3 cog_offset, target_cog_offset;
 
   hrp::InvDynStateBuffer idsb;
   std::vector<IIRFilter> invdyn_zmp_filters;

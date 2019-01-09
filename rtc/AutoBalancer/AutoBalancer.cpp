@@ -386,6 +386,8 @@ RTC::ReturnCode_t AutoBalancer::onInitialize()
     additional_force_applied_point_offset = hrp::Vector3::Zero();
 
     foot_mid_rotation = hrp::Matrix33::Identity();
+    cog_offset = hrp::Vector3::Zero();
+    target_cog_offset = hrp::Vector3::Zero();
     return RTC::RTC_OK;
 }
 
@@ -1758,6 +1760,7 @@ bool AutoBalancer::setAutoBalancerParam(const OpenHRP::AutoBalancerService::Auto
                                                  i_param.foot_mid_rot_quaternion[1],
                                                  i_param.foot_mid_rot_quaternion[2],
                                                  i_param.foot_mid_rot_quaternion[3]).normalized().toRotationMatrix());
+  for (size_t j = 0; j < 3; j++) target_cog_offset(j) = i_param.target_cog_offset[j];
   transition_time = i_param.transition_time;
   std::vector<std::string> cur_leg_names, dst_leg_names;
   cur_leg_names = leg_names;
@@ -1908,6 +1911,7 @@ bool AutoBalancer::getAutoBalancerParam(OpenHRP::AutoBalancerService::AutoBalanc
       i_param.foot_mid_rot_quaternion[2] = qt.y();
       i_param.foot_mid_rot_quaternion[3] = qt.z();
   }
+  for (size_t j = 0; j < 3; j++) i_param.target_cog_offset[j] = target_cog_offset(j);
   i_param.transition_time = transition_time;
   i_param.zmp_transition_time = zmp_transition_time;
   i_param.adjust_footstep_transition_time = adjust_footstep_transition_time;
@@ -2104,7 +2108,10 @@ bool AutoBalancer::getGoPosFootstepsSequence(const double& x, const double& y, c
 void AutoBalancer::static_balance_point_proc_one(hrp::Vector3& tmp_input_sbp, const double ref_com_height)
 {
   hrp::Vector3 target_sbp = hrp::Vector3(0, 0, 0);
-  hrp::Vector3 tmpcog = m_robot->calcCM();
+  hrp::Vector3 tmpcog = m_robot->calcCM() + cog_offset;
+  hrp::Vector3 diff_offset = target_cog_offset - cog_offset;
+  if (diff_offset.norm() > 1e-3) diff_offset = diff_offset.normalized() * 1e-3;
+  cog_offset = cog_offset + diff_offset;
   if ( use_force == MODE_NO_FORCE ) {
     tmp_input_sbp = tmpcog + sbp_cog_offset;
   } else {

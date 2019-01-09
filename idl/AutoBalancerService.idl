@@ -336,6 +336,7 @@ module OpenHRP
       DblArray4 foot_mid_rot_quaternion;
       boolean general_zmp_mode;
       BoolArray2 is_hands_grasping;
+      DblArray3 target_cog_offset;
     };
 
     /**
