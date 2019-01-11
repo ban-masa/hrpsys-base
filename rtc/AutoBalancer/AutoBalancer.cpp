@@ -2110,7 +2110,7 @@ void AutoBalancer::static_balance_point_proc_one(hrp::Vector3& tmp_input_sbp, co
   hrp::Vector3 target_sbp = hrp::Vector3(0, 0, 0);
   hrp::Vector3 tmpcog = m_robot->calcCM() + cog_offset;
   hrp::Vector3 diff_offset = target_cog_offset - cog_offset;
-  if (diff_offset.norm() > 1e-3) diff_offset = diff_offset.normalized() * 1e-3;
+  if (diff_offset.norm() > 0.5e-3) diff_offset = diff_offset.normalized() * 0.5e-3;
   cog_offset = cog_offset + diff_offset;
   if ( use_force == MODE_NO_FORCE ) {
     tmp_input_sbp = tmpcog + sbp_cog_offset;
